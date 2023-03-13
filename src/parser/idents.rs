@@ -1,13 +1,15 @@
+use core::fmt;
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, one_of, satisfy},
     combinator::{map, recognize},
-    error::VerboseError,
+    error::ParseError,
     multi::many0_count,
     sequence::tuple,
     IResult,
 };
+use std::fmt::Display;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Identifier {
@@ -17,7 +19,20 @@ pub enum Identifier {
     Ellipsis,
 }
 
-pub(super) fn identifier(input: &str) -> IResult<&str, Identifier, VerboseError<&str>> {
+impl Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Identifier::InitialSubsequent(s) => write!(f, "{}", s),
+            Identifier::Plus => write!(f, "+"),
+            Identifier::Minus => write!(f, "-"),
+            Identifier::Ellipsis => write!(f, "..."),
+        }
+    }
+}
+
+pub(super) fn identifier<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, Identifier, E> {
     alt((
         map(recognize(tuple((initial, many0_count(subsequent)))), |s| {
             Identifier::InitialSubsequent(s.to_lowercase())
@@ -29,12 +44,12 @@ pub(super) fn identifier(input: &str) -> IResult<&str, Identifier, VerboseError<
 }
 
 #[derive(Debug, Clone)]
-pub enum Initial {
+enum Initial {
     Letter(Letter),
     Other(char), // | ! | $ | % | & | * | / | : | < | = | > | ? | ~ | _ | ^
 }
 
-fn initial(input: &str) -> IResult<&str, Initial, VerboseError<&str>> {
+fn initial<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Initial, E> {
     alt((
         map(letter, Initial::Letter),
         map(one_of("!$%&*/:<=>?~_^"), Initial::Other),
@@ -47,7 +62,7 @@ enum Subsequent {
     Other(char), // . | + | -
 }
 
-fn subsequent(input: &str) -> IResult<&str, Subsequent, VerboseError<&str>> {
+fn subsequent<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Subsequent, E> {
     alt((
         map(initial, Subsequent::Initial),
         map(digit_ident, Subsequent::Digit),
@@ -57,24 +72,26 @@ fn subsequent(input: &str) -> IResult<&str, Subsequent, VerboseError<&str>> {
 
 type Letter = char; // a | b | ... | z
 
-fn letter(input: &str) -> IResult<&str, Letter, VerboseError<&str>> {
+fn letter<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Letter, E> {
     satisfy(|c| c.is_alphabetic())(input)
 }
 
 type DigitIdent = char; // 0 | 1 | ... | 9
 
-pub(super) fn digit_ident(input: &str) -> IResult<&str, char, VerboseError<&str>> {
+pub(super) fn digit_ident<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, char, E> {
     satisfy(|c| c.is_ascii_digit())(input)
 }
 
 #[cfg(test)]
 mod test {
+    use nom::error::VerboseError;
+
     use super::*;
 
     #[test]
     fn test_identifier() {
         assert_eq!(
-            identifier("hello"),
+            identifier::<VerboseError<&str>>("hello"),
             Ok(("", Identifier::InitialSubsequent("hello".into())))
         )
     }

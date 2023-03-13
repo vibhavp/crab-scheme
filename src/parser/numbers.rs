@@ -1,9 +1,11 @@
+use std::num::{ParseFloatError, ParseIntError};
+
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
     character::complete::{char, one_of},
     combinator::{map, map_res, opt, recognize, value},
-    error::VerboseError,
+    error::{FromExternalError, ParseError},
     multi::{many0, many0_count, many1},
     sequence::{pair, preceded, separated_pair, terminated, tuple},
     IResult, Parser,
@@ -15,7 +17,7 @@ pub struct Prefix {
     pub exactness: Exactness,
 }
 
-fn prefix(input: &str) -> IResult<&str, Prefix, VerboseError<&str>> {
+fn prefix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Prefix, E> {
     let (input, (radix, exactness)) =
         (pair(radix, exactness).or(pair(radix, exactness))).parse(input)?;
     Ok((input, Prefix { radix, exactness }))
@@ -27,7 +29,14 @@ pub struct Num<'a> {
     pub complex: Complex<'a>,
 }
 
-pub(super) fn num(input: &str) -> IResult<&str, Num, VerboseError<&str>> {
+pub(super) fn num<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseFloatError>
+        + FromExternalError<&'a str, ParseIntError>,
+>(
+    input: &'a str,
+) -> IResult<&str, Num, E> {
     map(tuple((prefix, complex)), |(prefix, complex)| Num {
         prefix,
         complex,
@@ -40,7 +49,14 @@ pub struct Complex<'a> {
     pub imag: Option<Real<'a>>,
 }
 
-fn complex(input: &str) -> IResult<&str, Complex, VerboseError<&str>> {
+fn complex<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseFloatError>
+        + FromExternalError<&'a str, ParseIntError>,
+>(
+    input: &'a str,
+) -> IResult<&'a str, Complex, E> {
     alt((
         map(real, |r| Complex {
             real: Some(r),
@@ -65,7 +81,14 @@ fn complex(input: &str) -> IResult<&str, Complex, VerboseError<&str>> {
     ))(input)
 }
 
-fn imag(input: &str) -> IResult<&str, Ureal, VerboseError<&str>> {
+fn imag<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseIntError>
+        + FromExternalError<&'a str, ParseFloatError>,
+>(
+    input: &'a str,
+) -> IResult<&str, Ureal, E> {
     alt((
         map(char('i'), |_| Ureal::Decimal(1.0)),
         terminated(ureal, char('i')),
@@ -78,7 +101,14 @@ pub enum Real<'a> {
     Negative(Ureal<'a>),
 }
 
-fn real(input: &str) -> IResult<&str, Real, VerboseError<&str>> {
+fn real<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseIntError>
+        + FromExternalError<&'a str, ParseFloatError>,
+>(
+    input: &'a str,
+) -> IResult<&'a str, Real, E> {
     map(
         tuple((opt(alt((char('+'), char('-')))), ureal)),
         |(sign, ur)| match sign {
@@ -96,17 +126,26 @@ pub enum Ureal<'a> {
     Decimal(Decimal10),
 }
 
-fn ureal(input: &str) -> IResult<&str, Ureal, VerboseError<&str>> {
+fn ureal<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseIntError>
+        + FromExternalError<&'a str, ParseFloatError>,
+>(
+    input: &'a str,
+) -> IResult<&'a str, Ureal, E> {
     alt((
-        map(uinteger, |u| Ureal::Uinteger(u)),
+        map(uinteger, Ureal::Uinteger),
         map(separated_pair(uinteger, char('/'), uinteger), |(n, d)| {
             Ureal::Frac(n, d)
         }),
-        map(decimal10, |d| Ureal::Decimal(d)),
+        map(decimal10, Ureal::Decimal),
     ))(input)
 }
 
-fn uinteger10(input: &str) -> IResult<&str, u64, VerboseError<&str>> {
+fn uinteger10<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
+    input: &'a str,
+) -> IResult<&'a str, u64, E> {
     map_res(
         pair(recognize(many1(digit10)), many0_count(char('#'))),
         |(num, zeros)| {
@@ -122,7 +161,7 @@ pub struct Uinteger<'a> {
     pub zeros: usize,
 }
 
-fn uinteger(input: &str) -> IResult<&str, Uinteger, VerboseError<&str>> {
+fn uinteger<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Uinteger, E> {
     map(
         pair(
             recognize(take_while1(|chr: char| {
@@ -140,7 +179,14 @@ fn uinteger(input: &str) -> IResult<&str, Uinteger, VerboseError<&str>> {
 
 pub type Decimal10 = f64;
 
-fn decimal10(input: &str) -> IResult<&str, Decimal10, VerboseError<&str>> {
+fn decimal10<
+    'a,
+    E: ParseError<&'a str>
+        + FromExternalError<&'a str, ParseIntError>
+        + FromExternalError<&'a str, ParseFloatError>,
+>(
+    input: &'a str,
+) -> IResult<&'a str, Decimal10, E> {
     alt((
         map_res(tuple((recognize(uinteger10), exponent)), |(u, e)| {
             let mut f = String::from(u);
@@ -177,7 +223,9 @@ fn decimal10(input: &str) -> IResult<&str, Decimal10, VerboseError<&str>> {
     ))(input)
 }
 
-fn exponent(input: &str) -> IResult<&str, i32, VerboseError<&str>> {
+fn exponent<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
+    input: &'a str,
+) -> IResult<&'a str, i32, E> {
     map_res(
         tuple((
             preceded(
@@ -207,7 +255,7 @@ pub enum Exactness {
     Exact,
 }
 
-fn exactness(input: &str) -> IResult<&str, Exactness, VerboseError<&str>> {
+fn exactness<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Exactness, E> {
     alt((
         value(Exactness::Inexact, char('i')),
         value(Exactness::Exact, char('e')),
@@ -216,7 +264,7 @@ fn exactness(input: &str) -> IResult<&str, Exactness, VerboseError<&str>> {
     .parse(input)
 }
 
-fn digit10(input: &str) -> IResult<&str, char, VerboseError<&str>> {
+fn digit10<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, char, E> {
     one_of("012345679")(input)
 }
 
@@ -228,7 +276,7 @@ pub enum Radix {
     Sixteen,
 }
 
-fn radix(input: &str) -> IResult<&str, Radix, VerboseError<&str>> {
+fn radix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Radix, E> {
     map(
         opt(alt((
             value(Radix::Two, tag("#b")),
@@ -243,6 +291,8 @@ fn radix(input: &str) -> IResult<&str, Radix, VerboseError<&str>> {
 
 #[cfg(test)]
 mod tests {
+    use nom::error::VerboseError;
+
     use super::*;
 
     #[test]
@@ -283,7 +333,7 @@ mod tests {
 
         for case in cases {
             assert_eq!(
-                prefix(case.input),
+                prefix::<VerboseError<&str>>(case.input),
                 Ok(("", case.prefix)),
                 "input: {}",
                 case.input
@@ -314,7 +364,7 @@ mod tests {
 
         for case in cases {
             assert_eq!(
-                decimal10(case.input),
+                decimal10::<VerboseError<&str>>(case.input),
                 Ok(("", case.decimal)),
                 "parsing {}",
                 case.input

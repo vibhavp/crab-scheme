@@ -1,17 +1,17 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{char, multispace1},
-    combinator::{cut, map, map_res, opt},
+    character::complete::{char, multispace0, multispace1},
+    combinator::{cut, map, map_res, opt, verify},
     error::{context, VerboseError},
     multi::{many0, many1},
-    sequence::{delimited, preceded, separated_pair, terminated, tuple},
+    sequence::{preceded, separated_pair, terminated, tuple},
     IResult,
 };
 
 use super::{
-    body, data, datum, variable, whitespace_delimited, Body, Boolean, Character, Datum, Number,
-    OneOrMore, SchemeString, SyntaxBinding, Variable,
+    body, data, datum, s_expression, s_expression_context, variable, whitespace_delimited, Body,
+    Boolean, Character, Datum, Number, OneOrMore, SchemeString, SyntaxBinding, Variable,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,8 +32,9 @@ pub enum Expression<'a> {
         var: Variable,
         expr: Box<Expression<'a>>,
     },
-    LetSyntax(Vec<SyntaxBinding>, OneOrMore<Expression<'a>>),
-    LetRecSyntax(Vec<SyntaxBinding>, OneOrMore<Expression<'a>>),
+    Let(Let<'a>),
+    LetSyntax(Vec<SyntaxBinding<'a>>, OneOrMore<Expression<'a>>),
+    LetRecSyntax(Vec<SyntaxBinding<'a>>, OneOrMore<Expression<'a>>),
     Application(Application<'a>),
 }
 
@@ -85,24 +86,45 @@ pub(super) fn expression(input: &str) -> IResult<&str, Expression, VerboseError<
             ),
         ),
     );
+    let let_expr = context(
+        "let",
+        map(
+            preceded(
+                terminated(tag("let"), multispace0),
+                tuple((
+                    opt(whitespace_delimited(context("proc-id", variable))),
+                    cut(s_expression_context(
+                        "let-bindings",
+                        many0(whitespace_delimited(binding)),
+                    )),
+                    whitespace_delimited(body),
+                )),
+            ),
+            |(variable, bindings, body)| {
+                Expression::Let(if let Some(var) = variable {
+                    Let::NamedLet(var, bindings, body)
+                } else {
+                    Let::SimpleLet(bindings, body)
+                })
+            },
+        ),
+    );
+
     let application = context(
         "application",
         map_res(many1(whitespace_delimited(expression)), |exprs| {
             Ok::<_, ()>(Expression::Application(exprs.try_into()?))
         }),
     );
-    let sexp = alt((quote, lambda, if_expr, set, application));
+    let sexp = alt((quote, lambda, if_expr, set, let_expr, application));
+
     context(
         "expression",
         alt((
             map(variable, Expression::Variable),
             map(constant, Expression::Constant),
             map(preceded(char('\''), cut(datum)), Expression::Quote),
-            delimited(
-                context("expression begin", char('(')),
-                whitespace_delimited(sexp),
-                context("expression end", cut(char(')'))),
-            ),
+            s_expression(sexp),
         )),
     )(input)
 }
@@ -130,35 +152,66 @@ fn constant(input: &str) -> IResult<&str, Constant, VerboseError<&str>> {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Formals {
     Variable(Variable),
-    VecVariable(Vec<Variable>),
-    OneOrMoreRest(OneOrMore<Variable>, Variable),
+    Variables(Vec<Variable>),
+    VariablesRest(OneOrMore<Variable>, Variable),
 }
 
 fn formals(input: &str) -> IResult<&str, Formals, VerboseError<&str>> {
     context(
-        "formals",
+        "lambda formals",
         alt((
-            map(preceded(multispace1, variable), Formals::Variable),
-            delimited(
-                context("formals begin", char('(')),
-                alt((
-                    map(many0(whitespace_delimited(variable)), Formals::VecVariable),
-                    map_res(
-                        separated_pair(
-                            many1(whitespace_delimited(variable)),
-                            char('.'),
-                            context("rest", whitespace_delimited(variable)),
-                        ),
-                        |(vars, rest)| Ok::<_, ()>(Formals::OneOrMoreRest(vars.try_into()?, rest)),
-                    ),
-                )),
-                context("formals end", cut(char(')'))),
+            map(
+                terminated(context("rest-id", variable), multispace0),
+                Formals::Variable,
             ),
+            s_expression(alt((map_res(
+                verify(
+                    tuple((
+                        many0(whitespace_delimited(variable)),
+                        opt(preceded(
+                            char('.'),
+                            whitespace_delimited(context("rest-id", cut(variable))),
+                        )),
+                    )),
+                    |(variables, rest_id)| {
+                        rest_id.is_none() || (rest_id.is_some() && !variables.is_empty())
+                    },
+                ),
+                |(vars, rest_id)| {
+                    Ok::<_, ()>(match rest_id {
+                        Some(rest) => Formals::VariablesRest(vars.try_into()?, rest),
+                        None => Formals::Variables(vars),
+                    })
+                },
+            ),))),
         )),
     )(input)
 }
 
 pub type Application<'a> = OneOrMore<Expression<'a>>;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Let<'a> {
+    SimpleLet(Vec<Binding<'a>>, Body<'a>),
+    NamedLet(Variable, Vec<Binding<'a>>, Body<'a>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Binding<'a> {
+    pub var: Variable,
+    pub expr: Expression<'a>,
+}
+
+// (<variable> <expression>)
+fn binding(input: &str) -> IResult<&str, Binding, VerboseError<&str>> {
+    context(
+        "binding",
+        map(
+            s_expression(separated_pair(variable, multispace0, cut(expression))),
+            |(var, expr)| Binding { var, expr },
+        ),
+    )(input)
+}
 
 #[cfg(test)]
 mod test {
@@ -169,13 +222,15 @@ mod test {
     fn test_expression() {
         assert_eq!(
             expression("#t"),
-            Ok(("", Expression::Constant(Constant::Boolean(true))))
+            Ok(("", Expression::Constant(Constant::Boolean(Boolean(true)))))
         );
         assert_eq!(
             expression("'(#t)"),
             Ok((
                 "",
-                Expression::Quote(Datum::List(data::List::NList(vec![Datum::Boolean(true)])))
+                Expression::Quote(Datum::List(data::List::NList(vec![Datum::Boolean(
+                    Boolean(true)
+                )])))
             ))
         );
         assert_eq!(
@@ -255,6 +310,129 @@ mod test {
                     )))),
                 }
             ))
-        )
+        );
+        assert_eq!(
+            expression("(lambda foo bar)"),
+            Ok((
+                "",
+                Expression::Lambda {
+                    formals: Formals::Variable(Variable::InitialSubsequent("foo".into())),
+                    body: Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("bar".into())
+                        )))
+                    )
+                }
+            ))
+        );
+        assert_eq!(
+            expression("(lambda (foo a1 a2) bar)"),
+            Ok((
+                "",
+                Expression::Lambda {
+                    formals: Formals::Variables(vec![
+                        Variable::InitialSubsequent("foo".into()),
+                        Variable::InitialSubsequent("a1".into()),
+                        Variable::InitialSubsequent("a2".into())
+                    ]),
+                    body: Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("bar".into())
+                        )))
+                    )
+                }
+            ))
+        );
+        assert_eq!(
+            expression("(lambda (foo a1 . rest) bar)"),
+            Ok((
+                "",
+                Expression::Lambda {
+                    formals: Formals::VariablesRest(
+                        OneOrMore::More(vec![
+                            Variable::InitialSubsequent("foo".into()),
+                            Variable::InitialSubsequent("a1".into()),
+                        ]),
+                        Variable::InitialSubsequent("rest".into())
+                    ),
+                    body: Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("bar".into())
+                        )))
+                    )
+                }
+            ))
+        );
+        assert_eq!(
+            expression("(let ((a b) (c d)) c)",),
+            Ok((
+                "",
+                Expression::Let(Let::SimpleLet(
+                    vec![
+                        Binding {
+                            var: Variable::InitialSubsequent("a".into()),
+                            expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                        },
+                        Binding {
+                            var: Variable::InitialSubsequent("c".into()),
+                            expr: Expression::Variable(Variable::InitialSubsequent("d".into()))
+                        },
+                    ],
+                    Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("c".into())
+                        )))
+                    )
+                ))
+            ))
+        );
+        assert_eq!(
+            expression("(let f ((a b)) c)",),
+            Ok((
+                "",
+                Expression::Let(Let::NamedLet(
+                    Variable::InitialSubsequent("f".into()),
+                    vec![Binding {
+                        var: Variable::InitialSubsequent("a".into()),
+                        expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                    }],
+                    Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("c".into())
+                        )))
+                    )
+                ))
+            ))
+        );
+        assert_eq!(
+            expression("(let f ((a b) (c d)) c)",),
+            Ok((
+                "",
+                Expression::Let(Let::NamedLet(
+                    Variable::InitialSubsequent("f".into()),
+                    vec![
+                        Binding {
+                            var: Variable::InitialSubsequent("a".into()),
+                            expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                        },
+                        Binding {
+                            var: Variable::InitialSubsequent("c".into()),
+                            expr: Expression::Variable(Variable::InitialSubsequent("d".into()))
+                        },
+                    ],
+                    Body(
+                        vec![],
+                        OneOrMore::One(Box::new(Expression::Variable(
+                            Variable::InitialSubsequent("c".into())
+                        )))
+                    )
+                ))
+            ))
+        );
     }
 }
