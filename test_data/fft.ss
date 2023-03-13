@@ -1,0 +1,18 @@
+(define fft-r2dit
+  (lambda (in-vec)
+    (define minus2*pi*i (* -2.0i (atan 0 -1)))
+    (define fft-r2dit-aux
+      (lambda (vec start leng stride)
+        (if (= leng 1)
+            (vector (vector-ref vec start))
+            (let* ((leng/2 (truncate (/ leng 2)))
+                   (evns (fft-r2dit-aux vec 0 leng/2 (* stride 2)))
+                   (odds (fft-r2dit-aux vec stride leng/2 (* stride 2)))
+                   (dft (make-vector leng)))
+              (do ((inx 0 (1+ inx)))
+                  ((>= inx leng/2) dft)
+		(let ((e (vector-ref evns inx))
+                      (o (* (vector-ref odds inx) (exp (* inx (/ minus2*pi*i leng))))))
+                  (vector-set! dft inx (+ e o))
+                  (vector-set! dft (+ inx leng/2) (- e o))))))))
+    (fft-r2dit-aux in-vec 0 (vector-length in-vec) 1)))
