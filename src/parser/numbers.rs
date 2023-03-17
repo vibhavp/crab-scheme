@@ -1,15 +1,23 @@
 use std::num::{ParseFloatError, ParseIntError};
 
 use nom::{
-    branch::alt,
-    bytes::complete::{tag, take_while1},
-    character::complete::{char, one_of},
-    combinator::{map, map_res, opt, recognize, value},
-    error::{FromExternalError, ParseError},
-    multi::{many0, many0_count, many1},
+    branch::{alt, permutation},
+    bytes::complete::take_while1,
+    character::complete::{char, digit0, digit1, one_of},
+    combinator::{map, map_res, opt, recognize, success, value},
+    error::{context, ContextError, FromExternalError, ParseError},
+    multi::many0_count,
     sequence::{pair, preceded, separated_pair, terminated, tuple},
     IResult, Parser,
 };
+
+use super::whitespace_delimited;
+
+#[derive(Debug, PartialEq, Copy, Clone)]
+pub enum Numerical {
+    Integer(isize),
+    Float(f64),
+}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Prefix {
@@ -17,36 +25,43 @@ pub struct Prefix {
     pub exactness: Exactness,
 }
 
-fn prefix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Prefix, E> {
-    let (input, (radix, exactness)) =
-        (pair(radix, exactness).or(pair(radix, exactness))).parse(input)?;
-    Ok((input, Prefix { radix, exactness }))
+fn prefix<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    input: &'a str,
+) -> IResult<&'a str, Prefix, E> {
+    context(
+        "prefix",
+        map(permutation((radix, exactness)), |(radix, exactness)| {
+            Prefix { radix, exactness }
+        }),
+    )(input)
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub struct Num<'a> {
-    pub prefix: Prefix,
-    pub complex: Complex<'a>,
+pub struct Num {
+    pub exactness: Exactness,
+    pub complex: Complex,
 }
 
 pub(super) fn num<
     'a,
     E: ParseError<&'a str>
         + FromExternalError<&'a str, ParseFloatError>
-        + FromExternalError<&'a str, ParseIntError>,
+        + FromExternalError<&'a str, ParseIntError>
+        + ContextError<&'a str>,
 >(
     input: &'a str,
 ) -> IResult<&str, Num, E> {
-    map(tuple((prefix, complex)), |(prefix, complex)| Num {
-        prefix,
+    let (input, prefix) = prefix(input)?;
+    map(complex(prefix.radix), move |complex| Num {
+        exactness: prefix.exactness,
         complex,
     })(input)
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub struct Complex<'a> {
-    pub real: Option<Real<'a>>,
-    pub imag: Option<Real<'a>>,
+pub struct Complex {
+    pub real: Option<Real>,
+    pub imag: Option<Real>,
 }
 
 fn complex<
@@ -55,30 +70,36 @@ fn complex<
         + FromExternalError<&'a str, ParseFloatError>
         + FromExternalError<&'a str, ParseIntError>,
 >(
-    input: &'a str,
-) -> IResult<&'a str, Complex, E> {
+    radix: Radix,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Complex, E> {
     alt((
-        map(real, |r| Complex {
+        (map(preceded(char('+'), imag(radix)), |u| Complex {
+            real: None,
+            imag: Some(Real::Positive(u)),
+        })),
+        (map(preceded(char('-'), imag(radix)), |u| Complex {
+            real: None,
+            imag: Some(Real::Negative(u)),
+        })),
+        (map(
+            separated_pair(real(radix), whitespace_delimited(char('+')), imag(radix)),
+            |(real, u)| Complex {
+                real: Some(real),
+                imag: Some(Real::Positive(u)),
+            },
+        )),
+        (map(
+            separated_pair(real(radix), whitespace_delimited(char('-')), imag(radix)),
+            |(real, u)| Complex {
+                real: Some(real),
+                imag: Some(Real::Negative(u)),
+            },
+        )),
+        map(real(radix), |r| Complex {
             real: Some(r),
             imag: None,
         }),
-        (map(separated_pair(real, char('+'), imag), |(real, u)| Complex {
-            real: Some(real),
-            imag: Some(Real::Positive(u)),
-        })),
-        (map(separated_pair(real, char('-'), imag), |(real, u)| Complex {
-            real: Some(real),
-            imag: Some(Real::Negative(u)),
-        })),
-        (map(preceded(char('+'), imag), |u| Complex {
-            real: None,
-            imag: Some(Real::Positive(u)),
-        })),
-        (map(preceded(char('-'), imag), |u| Complex {
-            real: None,
-            imag: Some(Real::Negative(u)),
-        })),
-    ))(input)
+    ))
 }
 
 fn imag<
@@ -87,18 +108,18 @@ fn imag<
         + FromExternalError<&'a str, ParseIntError>
         + FromExternalError<&'a str, ParseFloatError>,
 >(
-    input: &'a str,
-) -> IResult<&str, Ureal, E> {
+    radix: Radix,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Ureal, E> {
     alt((
         map(char('i'), |_| Ureal::Decimal(1.0)),
-        terminated(ureal, char('i')),
-    ))(input)
+        terminated(ureal(radix), char('i')),
+    ))
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub enum Real<'a> {
-    Positive(Ureal<'a>),
-    Negative(Ureal<'a>),
+pub enum Real {
+    Positive(Ureal),
+    Negative(Ureal),
 }
 
 fn real<
@@ -107,22 +128,22 @@ fn real<
         + FromExternalError<&'a str, ParseIntError>
         + FromExternalError<&'a str, ParseFloatError>,
 >(
-    input: &'a str,
-) -> IResult<&'a str, Real, E> {
+    radix: Radix,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Real, E> {
     map(
-        tuple((opt(alt((char('+'), char('-')))), ureal)),
+        tuple((opt(alt((char('+'), char('-')))), ureal(radix))),
         |(sign, ur)| match sign {
-            Some('-') => Real::Positive(ur),
+            Some('-') => Real::Negative(ur),
             Some('+') | None => Real::Positive(ur),
             _ => Real::Positive(ur),
         },
-    )(input)
+    )
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub enum Ureal<'a> {
-    Uinteger(Uinteger<'a>),
-    Frac(Uinteger<'a>, Uinteger<'a>),
+pub enum Ureal {
+    Uinteger(Uinteger),
+    Frac(Uinteger, Uinteger),
     Decimal(Decimal10),
 }
 
@@ -132,52 +153,50 @@ fn ureal<
         + FromExternalError<&'a str, ParseIntError>
         + FromExternalError<&'a str, ParseFloatError>,
 >(
-    input: &'a str,
-) -> IResult<&'a str, Ureal, E> {
+    radix: Radix,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Ureal, E> {
     alt((
-        map(uinteger, Ureal::Uinteger),
-        map(separated_pair(uinteger, char('/'), uinteger), |(n, d)| {
-            Ureal::Frac(n, d)
-        }),
         map(decimal10, Ureal::Decimal),
-    ))(input)
+        map(
+            separated_pair(
+                uinteger(radix),
+                whitespace_delimited(char('/')),
+                uinteger(radix),
+            ),
+            |(n, d)| Ureal::Frac(n, d),
+        ),
+        map(uinteger(radix), Ureal::Uinteger),
+    ))
 }
 
 fn uinteger10<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
     input: &'a str,
-) -> IResult<&'a str, u64, E> {
+) -> IResult<&'a str, usize, E> {
+    uinteger(Radix::Ten)(input)
+}
+
+pub type Uinteger = usize;
+
+fn uinteger<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
+    radix: Radix,
+) -> impl FnMut(&'a str) -> IResult<&'a str, Uinteger, E> {
     map_res(
-        pair(recognize(many1(digit10)), many0_count(char('#'))),
-        |(num, zeros)| {
-            num.parse::<u64>()
-                .map(|u| u * (10_u64).pow(zeros.try_into().unwrap()))
-        },
-    )(input)
-}
-
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub struct Uinteger<'a> {
-    pub digits: &'a str,
-    pub zeros: usize,
-}
-
-fn uinteger<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Uinteger, E> {
-    map(
         pair(
-            recognize(take_while1(|chr: char| {
-                chr.is_digit(2)
-                    || chr.is_digit(8)
-                    || chr.is_ascii_digit()
-                    || chr.is_ascii_hexdigit()
-            })),
+            recognize(take_while1(move |chr: char| chr.is_digit(radix as u32))),
             many0_count(char('#')),
         ),
-        |(digits, zeros)| Uinteger { digits, zeros },
+        move |(digits, zeros)| {
+            usize::from_str_radix(digits, radix as u32)
+                .map(|u| u * (10_usize).pow(zeros.try_into().unwrap()))
+        },
     )
-    .parse(input)
 }
 
 pub type Decimal10 = f64;
+
+fn sign<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i32, E> {
+    alt((value(1, char('+')), value(-1, char('-')), success(1)))(input)
+}
 
 fn decimal10<
     'a,
@@ -197,20 +216,10 @@ fn decimal10<
         map_res(
             tuple((
                 alt((
-                    recognize(tuple((char('.'), many1(digit10)))),
-                    recognize(tuple((many1(digit10), char('.'), many0(digit10)))),
+                    recognize(tuple((char::<&'a str, _>('.'), digit1))),
+                    recognize(tuple((digit1, char('.'), digit0))),
                 )),
-                opt(recognize(tuple((
-                    preceded(
-                        one_of("esfdl"),
-                        map(opt(one_of("+-")), |s| match s {
-                            Some('+') | None => 1,
-                            Some('-') => -1,
-                            _ => 1,
-                        }),
-                    ),
-                    many1(one_of("0123456789")),
-                )))),
+                opt(recognize(tuple((preceded(one_of("esfdl"), sign), digit1)))),
             )),
             |(base, exp)| {
                 let mut f = String::from(base);
@@ -227,24 +236,8 @@ fn exponent<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntErro
     input: &'a str,
 ) -> IResult<&'a str, i32, E> {
     map_res(
-        tuple((
-            preceded(
-                one_of("esfdl"),
-                map(opt(one_of("+-")), |s| match s {
-                    Some('+') | None => 1,
-                    Some('-') => -1,
-                    _ => 1,
-                }),
-            ),
-            many1(digit10),
-        )),
-        |(sign, digits)| {
-            digits
-                .into_iter()
-                .collect::<String>()
-                .parse::<u32>()
-                .map(|u| (u as i32 * sign))
-        },
+        tuple((preceded(one_of("esfdl"), sign), digit1)),
+        |(sign, digits)| digits.parse::<u32>().map(|u| (u as i32 * sign)),
     )(input)
 }
 
@@ -259,31 +252,29 @@ fn exactness<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Exa
     alt((
         value(Exactness::Inexact, char('i')),
         value(Exactness::Exact, char('e')),
-        value(Exactness::Empty, tag("")),
-    ))
-    .parse(input)
-}
-
-fn digit10<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, char, E> {
-    one_of("012345679")(input)
+        success(Exactness::Empty),
+    ))(input)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Radix {
-    Two,
-    Eight,
-    Ten,
-    Sixteen,
+    Two = 2,
+    Eight = 8,
+    Ten = 10,
+    Sixteen = 16,
 }
 
 fn radix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Radix, E> {
     map(
-        opt(alt((
-            value(Radix::Two, tag("#b")),
-            value(Radix::Eight, tag("#o")),
-            value(Radix::Sixteen, tag("#x")),
-            value(Radix::Ten, tag("#d")),
-        ))),
+        opt(preceded(
+            char('#'),
+            alt((
+                value(Radix::Two, char('b')),
+                value(Radix::Eight, char('o')),
+                value(Radix::Sixteen, char('x')),
+                value(Radix::Ten, char('d')),
+            )),
+        )),
         |r| r.unwrap_or(Radix::Ten),
     )
     .parse(input)
@@ -338,6 +329,75 @@ mod tests {
                 "input: {}",
                 case.input
             );
+        }
+    }
+
+    #[test]
+    fn test_imag() {
+        struct Case {
+            input: &'static str,
+            num: Num,
+        }
+        fn case(
+            input: &'static str,
+            exactness: Exactness,
+            real: Option<Real>,
+            imag: Option<Real>,
+        ) -> Case {
+            Case {
+                input,
+                num: Num {
+                    exactness,
+                    complex: Complex { real, imag },
+                },
+            }
+        }
+        let cases = [
+            case(
+                "+2.0i",
+                Exactness::Empty,
+                None,
+                Some(Real::Positive(Ureal::Decimal(2.0))),
+            ),
+            case(
+                "1 +2i",
+                Exactness::Empty,
+                Some(Real::Positive(Ureal::Uinteger(1))),
+                Some(Real::Positive(Ureal::Uinteger(2))),
+            ),
+            case(
+                "1.0 + 2i",
+                Exactness::Empty,
+                Some(Real::Positive(Ureal::Decimal(1.0))),
+                Some(Real::Positive(Ureal::Uinteger(2))),
+            ),
+            case(
+                "1+ 2.0i",
+                Exactness::Empty,
+                Some(Real::Positive(Ureal::Uinteger(1))),
+                Some(Real::Positive(Ureal::Decimal(2.0))),
+            ),
+            case(
+                "1.0  + 2.0i",
+                Exactness::Empty,
+                Some(Real::Positive(Ureal::Decimal(1.0))),
+                Some(Real::Positive(Ureal::Decimal(2.0))),
+            ),
+            case(
+                "-1.0  + 2.0i",
+                Exactness::Empty,
+                Some(Real::Negative(Ureal::Decimal(1.0))),
+                Some(Real::Positive(Ureal::Decimal(2.0))),
+            ),
+        ];
+
+        for case in cases {
+            assert_eq!(
+                num::<VerboseError<&str>>(case.input),
+                Ok(("", case.num)),
+                "parsing {}",
+                case.input
+            )
         }
     }
 

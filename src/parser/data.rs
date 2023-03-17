@@ -23,7 +23,7 @@ use super::{
 pub enum Datum<'a> {
     Boolean(Boolean),
     Symbol(Symbol),
-    Number(Number<'a>),
+    Number(Number),
     Character(Character),
     String(SchemeString<'a>),
     List(List<'a>),
@@ -85,24 +85,10 @@ pub(super) fn boolean<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     )(input)
 }
 
-#[derive(Debug, Copy, Clone, PartialEq)]
-pub enum Number<'a> {
-    Num2(Num<'a>),
-    Num8(Num<'a>),
-    Num10(Num<'a>),
-    Num16(Num<'a>),
-}
+pub type Number = Num;
 
 pub(super) fn number<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&str, Number, E> {
-    context(
-        "number",
-        map(num, |n| match n.prefix.radix {
-            Radix::Two => Number::Num2(n),
-            Radix::Eight => Number::Num8(n),
-            Radix::Ten => Number::Num10(n),
-            Radix::Sixteen => Number::Num16(n),
-        }),
-    )(input)
+    context("number", num)(input)
 }
 
 #[derive(Debug, Copy, Clone, PartialEq)]

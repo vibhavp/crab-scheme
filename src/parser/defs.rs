@@ -1,12 +1,13 @@
 use super::{
-    expression, identifier, s_expression, whitespace_delimited, Expression, Identifier, OneOrMore,
+    expression, identifier, s_expression, whitespace_delimited, DatumError, ExprError, Expression,
+    Identifier, OneOrMore,
 };
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, multispace0, multispace1},
     combinator::{cut, map, map_res, opt},
-    error::{context, VerboseError},
+    error::{context, ContextError, FromExternalError, ParseError, VerboseError},
     multi::{many0, many1},
     sequence::{delimited, preceded, separated_pair, terminated, tuple},
     IResult,
@@ -21,7 +22,7 @@ pub enum Definition<'a> {
     LetRecSyntax(Vec<SyntaxBinding<'a>>, Vec<Definition<'a>>),
 }
 
-pub(super) fn definition(input: &str) -> IResult<&str, Definition, VerboseError<&str>> {
+pub(super) fn definition<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Definition, E> {
     let begin = context(
         "begin",
         preceded(
@@ -37,15 +38,9 @@ pub(super) fn definition(input: &str) -> IResult<&str, Definition, VerboseError<
         ),
     );
 
-    fn let_syntax_form<'a>(
+    fn let_syntax_form<'a, E: ExprError<'a>>(
         name: &'static str,
-    ) -> impl FnMut(
-        &'a str,
-    ) -> IResult<
-        &str,
-        (Vec<SyntaxBinding<'a>>, Vec<Definition>),
-        VerboseError<&'a str>,
-    > {
+    ) -> impl FnMut(&'a str) -> IResult<&str, (Vec<SyntaxBinding<'a>>, Vec<Definition>), E> {
         context(
             name,
             preceded(
@@ -94,7 +89,9 @@ pub enum VariableDefinition<'a> {
     },
 }
 
-fn variable_definition(input: &str) -> IResult<&str, VariableDefinition, VerboseError<&str>> {
+fn variable_definition<'a, E: ExprError<'a>>(
+    input: &'a str,
+) -> IResult<&'a str, VariableDefinition, E> {
     let function_def = map(
         tuple((
             delimited(
@@ -133,14 +130,16 @@ fn variable_definition(input: &str) -> IResult<&str, VariableDefinition, Verbose
 
 pub type Variable = Identifier;
 
-pub(super) fn variable(input: &str) -> IResult<&str, Variable, VerboseError<&str>> {
+pub(super) fn variable<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    input: &'a str,
+) -> IResult<&str, Variable, E> {
     context("variable", identifier)(input)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body<'a>(pub Vec<Definition<'a>>, pub OneOrMore<Expression<'a>>);
 
-pub(super) fn body(input: &str) -> IResult<&str, Body, VerboseError<&str>> {
+pub(super) fn body<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Body, E> {
     context(
         "body",
         map_res(
@@ -155,13 +154,17 @@ pub(super) fn body(input: &str) -> IResult<&str, Body, VerboseError<&str>> {
 
 pub type Keyword = Identifier;
 
-fn keyword(input: &str) -> IResult<&str, Keyword, VerboseError<&str>> {
+fn keyword<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
+    input: &'a str,
+) -> IResult<&str, Keyword, E> {
     context("keyword", identifier)(input)
 }
 
 pub type TransformerExpression<'a> = Expression<'a>;
 
-fn transformer_expression(input: &str) -> IResult<&str, TransformerExpression, VerboseError<&str>> {
+fn transformer_expression<'a, E: ExprError<'a>>(
+    input: &'a str,
+) -> IResult<&str, TransformerExpression, E> {
     context("transformer expression", expression)(input)
 }
 
@@ -172,7 +175,7 @@ pub struct SyntaxBinding<'a> {
 }
 
 // (<keyword> <transformer expression>)
-fn syntax_binding(input: &str) -> IResult<&str, SyntaxBinding, VerboseError<&str>> {
+fn syntax_binding<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&str, SyntaxBinding, E> {
     context(
         "syntax binding",
         map(

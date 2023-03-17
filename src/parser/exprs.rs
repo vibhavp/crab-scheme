@@ -3,7 +3,7 @@ use nom::{
     bytes::complete::tag,
     character::complete::{char, multispace0, multispace1},
     combinator::{cut, map, map_res, opt, verify},
-    error::{context, VerboseError},
+    error::{context, ContextError, FromExternalError, ParseError},
     multi::{many0, many1},
     sequence::{preceded, separated_pair, terminated, tuple},
     IResult,
@@ -11,7 +11,8 @@ use nom::{
 
 use super::{
     body, data, datum, s_expression, s_expression_context, variable, whitespace_delimited, Body,
-    Boolean, Character, Datum, Number, OneOrMore, SchemeString, SyntaxBinding, Variable,
+    Boolean, Character, Datum, DatumError, Number, OneOrMore, SchemeString, SyntaxBinding,
+    Variable,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -38,7 +39,10 @@ pub enum Expression<'a> {
     Application(Application<'a>),
 }
 
-pub(super) fn expression(input: &str) -> IResult<&str, Expression, VerboseError<&str>> {
+pub(super) trait ExprError<'a>: DatumError<'a> + FromExternalError<&'a str, ()> {}
+impl<'a, T> ExprError<'a> for T where T: DatumError<'a> + FromExternalError<&'a str, ()> {}
+
+pub(super) fn expression<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Expression, E> {
     let quote = context(
         "quote",
         preceded(
@@ -132,12 +136,12 @@ pub(super) fn expression(input: &str) -> IResult<&str, Expression, VerboseError<
 #[derive(Debug, Clone, PartialEq)]
 pub enum Constant<'a> {
     Boolean(Boolean),
-    Number(Number<'a>),
+    Number(Number),
     Character(Character),
     String(SchemeString<'a>),
 }
 
-fn constant(input: &str) -> IResult<&str, Constant, VerboseError<&str>> {
+fn constant<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Constant, E> {
     context(
         "constant",
         alt((
@@ -156,7 +160,9 @@ pub enum Formals {
     VariablesRest(OneOrMore<Variable>, Variable),
 }
 
-fn formals(input: &str) -> IResult<&str, Formals, VerboseError<&str>> {
+fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str> + FromExternalError<&'a str, ()>>(
+    input: &'a str,
+) -> IResult<&'a str, Formals, E> {
     context(
         "lambda formals",
         alt((
@@ -203,7 +209,7 @@ pub struct Binding<'a> {
 }
 
 // (<variable> <expression>)
-fn binding(input: &str) -> IResult<&str, Binding, VerboseError<&str>> {
+fn binding<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&str, Binding, E> {
     context(
         "binding",
         map(
@@ -221,11 +227,11 @@ mod test {
     #[test]
     fn test_expression() {
         assert_eq!(
-            expression("#t"),
+            expression::<VerboseError<&str>>("#t"),
             Ok(("", Expression::Constant(Constant::Boolean(Boolean(true)))))
         );
         assert_eq!(
-            expression("'(#t)"),
+            expression::<VerboseError<&str>>("'(#t)"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(data::List::NList(vec![Datum::Boolean(
@@ -234,7 +240,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(+ a b)"),
+            expression::<VerboseError<&str>>("(+ a b)"),
             Ok((
                 "",
                 Expression::Application(OneOrMore::More(vec![
@@ -245,7 +251,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("'(+ a b)"),
+            expression::<VerboseError<&str>>("'(+ a b)"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
@@ -256,7 +262,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(set! foo bar)"),
+            expression::<VerboseError<&str>>("(set! foo bar)"),
             Ok((
                 "",
                 Expression::Set {
@@ -268,7 +274,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(set! foo (quote (+ a b)))"),
+            expression::<VerboseError<&str>>("(set! foo (quote (+ a b)))"),
             Ok((
                 "",
                 Expression::Set {
@@ -282,7 +288,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(quote (+ a b))"),
+            expression::<VerboseError<&str>>("(quote (+ a b))"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
@@ -293,7 +299,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(if (> a b) foo bar)"),
+            expression::<VerboseError<&str>>("(if (> a b) foo bar)"),
             Ok((
                 "",
                 Expression::If {
@@ -312,7 +318,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(lambda foo bar)"),
+            expression::<VerboseError<&str>>("(lambda foo bar)"),
             Ok((
                 "",
                 Expression::Lambda {
@@ -327,7 +333,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(lambda (foo a1 a2) bar)"),
+            expression::<VerboseError<&str>>("(lambda (foo a1 a2) bar)"),
             Ok((
                 "",
                 Expression::Lambda {
@@ -346,7 +352,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(lambda (foo a1 . rest) bar)"),
+            expression::<VerboseError<&str>>("(lambda (foo a1 . rest) bar)"),
             Ok((
                 "",
                 Expression::Lambda {
@@ -367,7 +373,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(let ((a b) (c d)) c)",),
+            expression::<VerboseError<&str>>("(let ((a b) (c d)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::SimpleLet(
@@ -391,7 +397,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(let f ((a b)) c)",),
+            expression::<VerboseError<&str>>("(let f ((a b)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
@@ -410,7 +416,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression("(let f ((a b) (c d)) c)",),
+            expression::<VerboseError<&str>>("(let f ((a b) (c d)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(

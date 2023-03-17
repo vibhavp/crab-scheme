@@ -3,7 +3,7 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, one_of, satisfy},
-    combinator::{map, recognize},
+    combinator::{map, recognize, value},
     error::ParseError,
     multi::many0_count,
     sequence::tuple,
@@ -37,9 +37,9 @@ pub(super) fn identifier<'a, E: ParseError<&'a str>>(
         map(recognize(tuple((initial, many0_count(subsequent)))), |s| {
             Identifier::InitialSubsequent(s.to_lowercase())
         }),
-        map(char('+'), |_| Identifier::Plus),
-        map(char('-'), |_| Identifier::Minus),
-        map(tag("..."), |_| Identifier::Ellipsis),
+        value(Identifier::Plus, char('+')),
+        value(Identifier::Minus, char('-')),
+        value(Identifier::Ellipsis, tag("...")),
     ))(input)
 }
 
@@ -56,6 +56,7 @@ fn initial<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Initial,
     ))(input)
 }
 
+#[derive(Debug, Clone)]
 enum Subsequent {
     Initial(Initial),
     Digit(DigitIdent),
