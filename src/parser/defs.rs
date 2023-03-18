@@ -1,13 +1,13 @@
 use super::{
-    expression, identifier, s_expression, whitespace_delimited, DatumError, ExprError, Expression,
-    Identifier, OneOrMore,
+    expression, identifier, s_expression, whitespace_delimited, ExprError, Expression, Identifier,
+    OneOrMore,
 };
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, multispace0, multispace1},
-    combinator::{cut, map, map_res, opt},
-    error::{context, ContextError, FromExternalError, ParseError, VerboseError},
+    combinator::{cut, map, opt},
+    error::{context, ContextError, ParseError},
     multi::{many0, many1},
     sequence::{delimited, preceded, separated_pair, terminated, tuple},
     IResult,
@@ -142,12 +142,12 @@ pub struct Body<'a>(pub Vec<Definition<'a>>, pub OneOrMore<Expression<'a>>);
 pub(super) fn body<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Body, E> {
     context(
         "body",
-        map_res(
+        map(
             tuple((
                 many0(whitespace_delimited(definition)),
                 many1(whitespace_delimited(expression)),
             )),
-            |(def, expr)| Ok::<_, ()>(Body(def, expr.try_into()?)),
+            |(def, expr)| Body(def, expr.into()),
         ),
     )(input)
 }

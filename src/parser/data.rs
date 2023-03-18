@@ -15,9 +15,7 @@ use std::{
     num::{ParseFloatError, ParseIntError},
 };
 
-use super::{
-    identifier, num, s_expression, whitespace_delimited, Identifier, Num, OneOrMore, Radix,
-};
+use super::{identifier, num, s_expression, whitespace_delimited, Identifier, Num, OneOrMore};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Datum<'a> {

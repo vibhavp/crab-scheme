@@ -116,8 +116,8 @@ pub(super) fn expression<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a st
 
     let application = context(
         "application",
-        map_res(many1(whitespace_delimited(expression)), |exprs| {
-            Ok::<_, ()>(Expression::Application(exprs.try_into()?))
+        map(many1(whitespace_delimited(expression)), |exprs| {
+            Expression::Application(exprs.into())
         }),
     );
     let sexp = alt((quote, lambda, if_expr, set, let_expr, application));
@@ -157,7 +157,7 @@ fn constant<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Constant,
 pub enum Formals {
     Variable(Variable),
     Variables(Vec<Variable>),
-    VariablesRest(OneOrMore<Variable>, Variable),
+    VariablesRest(OneOrMore<Variable, Variable>, Variable),
 }
 
 fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str> + FromExternalError<&'a str, ()>>(
@@ -170,7 +170,7 @@ fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str> + FromExternalErro
                 terminated(context("rest-id", variable), multispace0),
                 Formals::Variable,
             ),
-            s_expression(alt((map_res(
+            s_expression(alt((map(
                 verify(
                     tuple((
                         many0(whitespace_delimited(variable)),
@@ -183,11 +183,9 @@ fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str> + FromExternalErro
                         rest_id.is_none() || (rest_id.is_some() && !variables.is_empty())
                     },
                 ),
-                |(vars, rest_id)| {
-                    Ok::<_, ()>(match rest_id {
-                        Some(rest) => Formals::VariablesRest(vars.try_into()?, rest),
-                        None => Formals::Variables(vars),
-                    })
+                |(vars, rest_id)| match rest_id {
+                    Some(rest) => Formals::VariablesRest(vars.into(), rest),
+                    None => Formals::Variables(vars),
                 },
             ),))),
         )),
@@ -223,6 +221,7 @@ fn binding<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&str, Binding, E> {
 mod test {
     use super::*;
     use data::{List, Symbol};
+    use nom::error::VerboseError;
 
     #[test]
     fn test_expression() {

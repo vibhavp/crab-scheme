@@ -5,6 +5,8 @@ mod idents;
 mod numbers;
 mod programs;
 
+use std::ops::Deref;
+
 pub use data::*;
 pub use defs::*;
 pub use exprs::*;
@@ -14,35 +16,44 @@ pub use programs::*;
 use nom::{
     character::complete::{char, multispace0},
     combinator::cut,
-    error::{context, ContextError, ParseError, VerboseError},
+    error::{context, ContextError, ParseError},
     sequence::delimited,
     IResult, Parser,
 };
 pub use numbers::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum OneOrMore<T> {
-    One(Box<T>),
+pub enum OneOrMore<T: Clone, C = Box<T>> {
+    One(C),
     More(Vec<T>),
 }
 
-impl<T: Clone> TryFrom<Vec<T>> for OneOrMore<T> {
-    type Error = ();
-    fn try_from(value: Vec<T>) -> Result<Self, Self::Error> {
-        if value.is_empty() {
-            Err(())
-        } else if value.len() == 1 {
-            Ok(OneOrMore::One(Box::new(value[0].clone())))
+impl<T: Clone> From<Vec<T>> for OneOrMore<T> {
+    fn from(vec: Vec<T>) -> Self {
+        assert!(!vec.is_empty());
+        if vec.len() == 1 {
+            OneOrMore::One(Box::new(vec[0].clone()))
         } else {
-            Ok(OneOrMore::More(value))
+            OneOrMore::More(vec)
         }
     }
 }
 
-impl<T> From<OneOrMore<T>> for Vec<T> {
-    fn from(value: OneOrMore<T>) -> Self {
+impl<T: Clone> From<Vec<T>> for OneOrMore<T, T> {
+    fn from(vec: Vec<T>) -> Self {
+        assert!(!vec.is_empty());
+        if vec.len() == 1 {
+            OneOrMore::One(vec[0].clone())
+        } else {
+            OneOrMore::More(vec)
+        }
+    }
+}
+
+impl<T: Clone, C: Deref<Target = T>> From<OneOrMore<T, C>> for Vec<T> {
+    fn from(value: OneOrMore<T, C>) -> Self {
         match value {
-            OneOrMore::One(b) => vec![*b],
+            OneOrMore::One(b) => vec![(*b).clone()],
             OneOrMore::More(b) => b,
         }
     }
