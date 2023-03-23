@@ -1,6 +1,6 @@
 use super::{
-    expression, identifier, s_expression, whitespace_delimited, ExprError, Expression, Identifier,
-    OneOrMore,
+    expression, identifier, s_expression, whitespace_delimited, DatumParseError, Expression,
+    Identifier, OneOrMore,
 };
 use nom::{
     branch::alt,
@@ -22,7 +22,9 @@ pub enum Definition<'a> {
     LetRecSyntax(Vec<SyntaxBinding<'a>>, Vec<Definition<'a>>),
 }
 
-pub(super) fn definition<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Definition, E> {
+pub(super) fn definition<'a, E: DatumParseError<'a>>(
+    input: &'a str,
+) -> IResult<&'a str, Definition, E> {
     let begin = context(
         "begin",
         preceded(
@@ -38,7 +40,7 @@ pub(super) fn definition<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a st
         ),
     );
 
-    fn let_syntax_form<'a, E: ExprError<'a>>(
+    fn let_syntax_form<'a, E: DatumParseError<'a>>(
         name: &'static str,
     ) -> impl FnMut(&'a str) -> IResult<&str, (Vec<SyntaxBinding<'a>>, Vec<Definition>), E> {
         context(
@@ -89,7 +91,7 @@ pub enum VariableDefinition<'a> {
     },
 }
 
-fn variable_definition<'a, E: ExprError<'a>>(
+fn variable_definition<'a, E: DatumParseError<'a>>(
     input: &'a str,
 ) -> IResult<&'a str, VariableDefinition, E> {
     let function_def = map(
@@ -139,7 +141,7 @@ pub(super) fn variable<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body<'a>(pub Vec<Definition<'a>>, pub OneOrMore<Expression<'a>>);
 
-pub(super) fn body<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Body, E> {
+pub(super) fn body<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Body, E> {
     context(
         "body",
         map(
@@ -162,7 +164,7 @@ fn keyword<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 
 pub type TransformerExpression<'a> = Expression<'a>;
 
-fn transformer_expression<'a, E: ExprError<'a>>(
+fn transformer_expression<'a, E: DatumParseError<'a>>(
     input: &'a str,
 ) -> IResult<&str, TransformerExpression, E> {
     context("transformer expression", expression)(input)
@@ -175,7 +177,7 @@ pub struct SyntaxBinding<'a> {
 }
 
 // (<keyword> <transformer expression>)
-fn syntax_binding<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&str, SyntaxBinding, E> {
+fn syntax_binding<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, SyntaxBinding, E> {
     context(
         "syntax binding",
         map(

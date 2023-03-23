@@ -1,17 +1,13 @@
-use nom::{
-    branch::alt,
-    combinator::map,
-    error::{context, VerboseError},
-    multi::many0,
-    IResult,
-};
+use nom::{branch::alt, combinator::map, error::context, multi::many0, IResult};
 
-use super::{definition, expression, whitespace_delimited, Definition, Expression};
+use super::{
+    definition, expression, whitespace_delimited, DatumParseError, Definition, Expression,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program<'a>(pub Vec<Form<'a>>);
 
-pub fn program(input: &str) -> IResult<&str, Program, VerboseError<&str>> {
+pub fn program<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Program, E> {
     context("program", map(many0(whitespace_delimited(form)), Program))(input)
 }
 
@@ -21,7 +17,7 @@ pub enum Form<'a> {
     Expression(Expression<'a>),
 }
 
-fn form(input: &str) -> IResult<&str, Form, VerboseError<&str>> {
+fn form<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Form, E> {
     context(
         "form",
         alt((

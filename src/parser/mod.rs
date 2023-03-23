@@ -5,6 +5,7 @@ mod idents;
 mod numbers;
 mod programs;
 
+use nom_locate::LocatedSpan;
 use std::ops::Deref;
 
 pub use data::*;
@@ -92,4 +93,10 @@ where
             context("sexp end", cut(char(')'))),
         ),
     )
+}
+
+#[derive(Debug, Clone)]
+pub struct WithPosition<T, I, X = ()> {
+    pub position: LocatedSpan<I, X>,
+    pub token: T,
 }

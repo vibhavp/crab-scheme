@@ -3,19 +3,21 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{anychar, char},
-    combinator::{cut, map, map_res, not, opt, recognize, value},
-    error::{context, ContextError, FromExternalError, ParseError, VerboseError},
+    combinator::{cut, map, not, opt, recognize, value},
+    error::{context, ContextError, FromExternalError, ParseError},
     multi::{many0, many1},
     sequence::{delimited, preceded, separated_pair},
     IResult, Parser,
 };
 use std::{
     borrow::Cow,
-    fmt::Display,
+    fmt::{Display, Formatter},
     num::{ParseFloatError, ParseIntError},
 };
 
-use super::{identifier, num, s_expression, whitespace_delimited, Identifier, Num, OneOrMore};
+use super::{
+    identifier, num, s_expression, whitespace_delimited, Constant, Identifier, Num, OneOrMore,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Datum<'a> {
@@ -28,7 +30,31 @@ pub enum Datum<'a> {
     Vector(Vector<'a>),
 }
 
-pub(super) trait DatumError<'a>:
+impl<'a> Display for Datum<'a> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), fmt::Error> {
+        match self {
+            Self::Boolean(b) => write!(f, "{}", b),
+            Self::Symbol(s) => write!(f, "{}", s),
+            Self::Number(n) => write!(f, "num"),
+            Self::Character(c) => write!(f, "{}", c),
+            Self::String(s) => write!(f, "{}", s),
+            _ => todo!(),
+        }
+    }
+}
+
+impl<'a> From<Constant<'a>> for Datum<'a> {
+    fn from(value: Constant<'a>) -> Self {
+        match value {
+            Constant::Boolean(b) => Self::Boolean(b),
+            Constant::Character(c) => Self::Character(c),
+            Constant::Number(n) => Self::Number(n),
+            Constant::String(s) => Self::String(s),
+        }
+    }
+}
+
+pub trait DatumParseError<'a>:
     ParseError<&'a str>
     + ContextError<&'a str>
     + FromExternalError<&'a str, ParseFloatError>
@@ -36,7 +62,7 @@ pub(super) trait DatumError<'a>:
 {
 }
 
-impl<'a, T> DatumError<'a> for T where
+impl<'a, T> DatumParseError<'a> for T where
     T: ParseError<&'a str>
         + ContextError<&'a str>
         + FromExternalError<&'a str, ParseFloatError>
@@ -44,7 +70,7 @@ impl<'a, T> DatumError<'a> for T where
 {
 }
 
-pub(super) fn datum<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&str, Datum, E> {
+pub(super) fn datum<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Datum, E> {
     context(
         "datum",
         alt((
@@ -85,7 +111,7 @@ pub(super) fn boolean<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 
 pub type Number = Num;
 
-pub(super) fn number<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&str, Number, E> {
+pub(super) fn number<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Number, E> {
     context("number", num)(input)
 }
 
@@ -177,11 +203,11 @@ pub enum List<'a> {
     Abbreviation(Abbreviation),
 }
 
-fn delimited_datum<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Datum, E> {
+fn delimited_datum<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Datum, E> {
     whitespace_delimited(datum)(input)
 }
 
-fn list<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, List, E> {
+fn list<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, List, E> {
     context(
         "list",
         alt((
@@ -234,7 +260,7 @@ fn abbreviation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, 
 
 pub type Vector<'a> = Vec<Datum<'a>>;
 
-fn vector<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Vector, E> {
+fn vector<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Vector, E> {
     context(
         "vector",
         preceded(
@@ -250,6 +276,8 @@ fn vector<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Vector, E> 
 
 #[cfg(test)]
 mod tests {
+    use nom::error::VerboseError;
+
     use super::*;
 
     #[test]

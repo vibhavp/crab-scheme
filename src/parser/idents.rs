@@ -1,4 +1,3 @@
-use core::fmt;
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -9,11 +8,12 @@ use nom::{
     sequence::tuple,
     IResult,
 };
-use std::fmt::Display;
+use std::fmt::{self, Display};
+use string_cache::{Atom, DefaultAtom};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Identifier {
-    InitialSubsequent(String),
+    InitialSubsequent(DefaultAtom),
     Plus,
     Minus,
     Ellipsis,
@@ -35,7 +35,7 @@ pub(super) fn identifier<'a, E: ParseError<&'a str>>(
 ) -> IResult<&'a str, Identifier, E> {
     alt((
         map(recognize(tuple((initial, many0_count(subsequent)))), |s| {
-            Identifier::InitialSubsequent(s.to_lowercase())
+            Identifier::InitialSubsequent(Atom::from(s.to_lowercase()))
         }),
         value(Identifier::Plus, char('+')),
         value(Identifier::Minus, char('-')),

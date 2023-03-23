@@ -2,8 +2,8 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, multispace0, multispace1},
-    combinator::{cut, map, map_res, opt, verify},
-    error::{context, ContextError, FromExternalError, ParseError},
+    combinator::{cut, map, opt, verify},
+    error::{context, ContextError, ParseError},
     multi::{many0, many1},
     sequence::{preceded, separated_pair, terminated, tuple},
     IResult,
@@ -11,7 +11,7 @@ use nom::{
 
 use super::{
     body, data, datum, s_expression, s_expression_context, variable, whitespace_delimited, Body,
-    Boolean, Character, Datum, DatumError, Number, OneOrMore, SchemeString, SyntaxBinding,
+    Boolean, Character, Datum, DatumParseError, Number, OneOrMore, SchemeString, SyntaxBinding,
     Variable,
 };
 
@@ -39,21 +39,20 @@ pub enum Expression<'a> {
     Application(Application<'a>),
 }
 
-pub(super) trait ExprError<'a>: DatumError<'a> + FromExternalError<&'a str, ()> {}
-impl<'a, T> ExprError<'a> for T where T: DatumError<'a> + FromExternalError<&'a str, ()> {}
-
-pub(super) fn expression<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a str, Expression, E> {
+pub(super) fn expression<'a, E: DatumParseError<'a>>(
+    input: &'a str,
+) -> IResult<&'a str, Expression, E> {
     let quote = context(
         "quote",
         preceded(
-            terminated(tag("quote"), multispace1),
+            terminated(tag("quote"), multispace0),
             map(cut(datum), Expression::Quote),
         ),
     );
     let lambda = context(
         "lambda",
         preceded(
-            terminated(tag("lambda"), multispace1),
+            terminated(tag("lambda"), multispace0),
             map(cut(tuple((formals, body))), |(formals, body)| {
                 Expression::Lambda { formals, body }
             }),
@@ -62,7 +61,7 @@ pub(super) fn expression<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a st
     let if_expr = context(
         "if",
         preceded(
-            terminated(tag("if"), multispace1),
+            terminated(tag("if"), multispace0),
             map(
                 tuple((
                     context("condition", cut(whitespace_delimited(expression))),
@@ -82,7 +81,7 @@ pub(super) fn expression<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&'a st
         preceded(
             terminated(tag("set!"), multispace1),
             map(
-                separated_pair(variable, multispace1, expression),
+                separated_pair(variable, multispace0, expression),
                 |(var, expr)| Expression::Set {
                     var,
                     expr: Box::new(expr),
@@ -141,7 +140,7 @@ pub enum Constant<'a> {
     String(SchemeString<'a>),
 }
 
-fn constant<'a, E: DatumError<'a>>(input: &'a str) -> IResult<&'a str, Constant, E> {
+fn constant<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Constant, E> {
     context(
         "constant",
         alt((
@@ -160,7 +159,7 @@ pub enum Formals {
     VariablesRest(OneOrMore<Variable, Variable>, Variable),
 }
 
-fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str> + FromExternalError<&'a str, ()>>(
+fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     input: &'a str,
 ) -> IResult<&'a str, Formals, E> {
     context(
@@ -207,7 +206,7 @@ pub struct Binding<'a> {
 }
 
 // (<variable> <expression>)
-fn binding<'a, E: ExprError<'a>>(input: &'a str) -> IResult<&str, Binding, E> {
+fn binding<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Binding, E> {
     context(
         "binding",
         map(
