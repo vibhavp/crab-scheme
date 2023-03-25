@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -6,13 +8,13 @@ use nom::{
     error::{context, ContextError, ParseError},
     multi::{many0, many1},
     sequence::{preceded, separated_pair, terminated, tuple},
-    IResult,
+    AsChar, IResult, InputIter, InputTakeAtPosition,
 };
 
 use super::{
     body, data, datum, s_expression, s_expression_context, variable, whitespace_delimited, Body,
-    Boolean, Character, Datum, DatumParseError, Number, OneOrMore, SchemeString, SyntaxBinding,
-    Variable,
+    Boolean, Character, Datum, DatumParseError, Number, OneOrMore, ParseToDatum, SchemeString,
+    SyntaxBinding, Variable,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -39,9 +41,12 @@ pub enum Expression<'a> {
     Application(Application<'a>),
 }
 
-pub(super) fn expression<'a, E: DatumParseError<'a>>(
-    input: &'a str,
-) -> IResult<&'a str, Expression, E> {
+pub(super) fn expression<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Expression<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     let quote = context(
         "quote",
         preceded(
@@ -124,8 +129,8 @@ pub(super) fn expression<'a, E: DatumParseError<'a>>(
     context(
         "expression",
         alt((
-            map(variable, Expression::Variable),
             map(constant, Expression::Constant),
+            map(variable, Expression::Variable),
             map(preceded(char('\''), cut(datum)), Expression::Quote),
             s_expression(sexp),
         )),
@@ -140,7 +145,12 @@ pub enum Constant<'a> {
     String(SchemeString<'a>),
 }
 
-fn constant<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Constant, E> {
+fn constant<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Constant<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     context(
         "constant",
         alt((
@@ -154,20 +164,23 @@ fn constant<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Cons
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Formals {
-    Variable(Variable),
+    Rest(Variable),
     Variables(Vec<Variable>),
     VariablesRest(OneOrMore<Variable, Variable>, Variable),
 }
 
-fn formals<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Formals, E> {
+fn formals<'a, I, E: ParseError<I> + ContextError<I>>(input: I) -> IResult<I, Formals, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Copy,
+{
     context(
         "lambda formals",
         alt((
             map(
                 terminated(context("rest-id", variable), multispace0),
-                Formals::Variable,
+                Formals::Rest,
             ),
             s_expression(alt((map(
                 verify(
@@ -206,7 +219,12 @@ pub struct Binding<'a> {
 }
 
 // (<variable> <expression>)
-fn binding<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Binding, E> {
+fn binding<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Binding<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "binding",
         map(
@@ -225,11 +243,11 @@ mod test {
     #[test]
     fn test_expression() {
         assert_eq!(
-            expression::<VerboseError<&str>>("#t"),
+            expression::<_, VerboseError<&str>>("#t"),
             Ok(("", Expression::Constant(Constant::Boolean(Boolean(true)))))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("'(#t)"),
+            expression::<_, VerboseError<&str>>("'(#t)"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(data::List::NList(vec![Datum::Boolean(
@@ -238,7 +256,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(+ a b)"),
+            expression::<_, VerboseError<&str>>("(+ a b)"),
             Ok((
                 "",
                 Expression::Application(OneOrMore::More(vec![
@@ -249,7 +267,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("'(+ a b)"),
+            expression::<_, VerboseError<&str>>("'(+ a b)"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
@@ -260,7 +278,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(set! foo bar)"),
+            expression::<_, VerboseError<&str>>("(set! foo bar)"),
             Ok((
                 "",
                 Expression::Set {
@@ -272,7 +290,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(set! foo (quote (+ a b)))"),
+            expression::<_, VerboseError<&str>>("(set! foo (quote (+ a b)))"),
             Ok((
                 "",
                 Expression::Set {
@@ -286,7 +304,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(quote (+ a b))"),
+            expression::<_, VerboseError<&str>>("(quote (+ a b))"),
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
@@ -297,7 +315,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(if (> a b) foo bar)"),
+            expression::<_, VerboseError<&str>>("(if (> a b) foo bar)"),
             Ok((
                 "",
                 Expression::If {
@@ -316,11 +334,11 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(lambda foo bar)"),
+            expression::<_, VerboseError<&str>>("(lambda foo bar)"),
             Ok((
                 "",
                 Expression::Lambda {
-                    formals: Formals::Variable(Variable::InitialSubsequent("foo".into())),
+                    formals: Formals::Rest(Variable::InitialSubsequent("foo".into())),
                     body: Body(
                         vec![],
                         OneOrMore::One(Box::new(Expression::Variable(
@@ -331,7 +349,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(lambda (foo a1 a2) bar)"),
+            expression::<_, VerboseError<&str>>("(lambda (foo a1 a2) bar)"),
             Ok((
                 "",
                 Expression::Lambda {
@@ -350,7 +368,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(lambda (foo a1 . rest) bar)"),
+            expression::<_, VerboseError<&str>>("(lambda (foo a1 . rest) bar)"),
             Ok((
                 "",
                 Expression::Lambda {
@@ -371,7 +389,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(let ((a b) (c d)) c)",),
+            expression::<_, VerboseError<&str>>("(let ((a b) (c d)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::SimpleLet(
@@ -395,7 +413,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(let f ((a b)) c)",),
+            expression::<_, VerboseError<&str>>("(let f ((a b)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
@@ -414,7 +432,7 @@ mod test {
             ))
         );
         assert_eq!(
-            expression::<VerboseError<&str>>("(let f ((a b) (c d)) c)",),
+            expression::<_, VerboseError<&str>>("(let f ((a b) (c d)) c)",),
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(

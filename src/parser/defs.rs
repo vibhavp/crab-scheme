@@ -1,6 +1,6 @@
 use super::{
     expression, identifier, s_expression, whitespace_delimited, DatumParseError, Expression,
-    Identifier, OneOrMore,
+    Identifier, OneOrMore, ParseToDatum, ToIdentifier,
 };
 use nom::{
     branch::alt,
@@ -10,21 +10,24 @@ use nom::{
     error::{context, ContextError, ParseError},
     multi::{many0, many1},
     sequence::{delimited, preceded, separated_pair, terminated, tuple},
-    IResult,
+    AsChar, IResult, InputIter, InputTakeAtPosition,
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Definition<'a> {
     Variable(VariableDefinition<'a>),
-    DefineSyntax(Keyword, TransformerExpression<'a>),
     Begin(Vec<Definition<'a>>),
+    DefineSyntax(Keyword, TransformerExpression<'a>),
     LetSyntax(Vec<SyntaxBinding<'a>>, Vec<Definition<'a>>),
     LetRecSyntax(Vec<SyntaxBinding<'a>>, Vec<Definition<'a>>),
 }
 
-pub(super) fn definition<'a, E: DatumParseError<'a>>(
-    input: &'a str,
-) -> IResult<&'a str, Definition, E> {
+pub(super) fn definition<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Definition<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     let begin = context(
         "begin",
         preceded(
@@ -40,9 +43,14 @@ pub(super) fn definition<'a, E: DatumParseError<'a>>(
         ),
     );
 
-    fn let_syntax_form<'a, E: DatumParseError<'a>>(
+    fn let_syntax_form<'a, I, E: DatumParseError<I>>(
         name: &'static str,
-    ) -> impl FnMut(&'a str) -> IResult<&str, (Vec<SyntaxBinding<'a>>, Vec<Definition>), E> {
+    ) -> impl FnMut(I) -> IResult<I, (Vec<SyntaxBinding<'a>>, Vec<Definition<'a>>), E>
+    where
+        I: ParseToDatum<'a>,
+        <I as InputIter>::Item: AsChar + Clone + Copy,
+        <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+    {
         context(
             name,
             preceded(
@@ -91,9 +99,14 @@ pub enum VariableDefinition<'a> {
     },
 }
 
-fn variable_definition<'a, E: DatumParseError<'a>>(
-    input: &'a str,
-) -> IResult<&'a str, VariableDefinition, E> {
+fn variable_definition<'a, I, E: DatumParseError<I>>(
+    input: I,
+) -> IResult<I, VariableDefinition<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     let function_def = map(
         tuple((
             delimited(
@@ -132,16 +145,25 @@ fn variable_definition<'a, E: DatumParseError<'a>>(
 
 pub type Variable = Identifier;
 
-pub(super) fn variable<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&str, Variable, E> {
+pub(super) fn variable<'a, I, E: ParseError<I> + ContextError<I>>(
+    input: I,
+) -> IResult<I, Variable, E>
+where
+    I: ToIdentifier<'a>,
+    <I as InputIter>::Item: AsChar + Copy,
+{
     context("variable", identifier)(input)
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Body<'a>(pub Vec<Definition<'a>>, pub OneOrMore<Expression<'a>>);
 
-pub(super) fn body<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Body, E> {
+pub(super) fn body<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Body<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "body",
         map(
@@ -156,17 +178,24 @@ pub(super) fn body<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a st
 
 pub type Keyword = Identifier;
 
-fn keyword<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&str, Keyword, E> {
+fn keyword<'a, I, E: ParseError<I> + ContextError<I>>(input: I) -> IResult<I, Variable, E>
+where
+    I: ToIdentifier<'a>,
+    <I as InputIter>::Item: AsChar + Copy,
+{
     context("keyword", identifier)(input)
 }
 
 pub type TransformerExpression<'a> = Expression<'a>;
 
-fn transformer_expression<'a, E: DatumParseError<'a>>(
-    input: &'a str,
-) -> IResult<&str, TransformerExpression, E> {
+fn transformer_expression<'a, I, E: DatumParseError<I>>(
+    input: I,
+) -> IResult<I, TransformerExpression<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context("transformer expression", expression)(input)
 }
 
@@ -177,7 +206,12 @@ pub struct SyntaxBinding<'a> {
 }
 
 // (<keyword> <transformer expression>)
-fn syntax_binding<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, SyntaxBinding, E> {
+fn syntax_binding<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, SyntaxBinding<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "syntax binding",
         map(

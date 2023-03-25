@@ -6,7 +6,7 @@ mod numbers;
 mod programs;
 
 use nom_locate::LocatedSpan;
-use std::ops::Deref;
+use std::ops::{Deref, RangeFrom};
 
 pub use data::*;
 pub use defs::*;
@@ -19,7 +19,7 @@ use nom::{
     combinator::cut,
     error::{context, ContextError, ParseError},
     sequence::delimited,
-    IResult, Parser,
+    AsChar, IResult, InputIter, InputTakeAtPosition, Parser, Slice,
 };
 pub use numbers::*;
 
@@ -51,6 +51,15 @@ impl<T: Clone> From<Vec<T>> for OneOrMore<T, T> {
     }
 }
 
+impl From<OneOrMore<Identifier, Identifier>> for Vec<Identifier> {
+    fn from(value: OneOrMore<Identifier, Identifier>) -> Self {
+        match value {
+            OneOrMore::One(v) => vec![v],
+            OneOrMore::More(v) => v,
+        }
+    }
+}
+
 impl<T: Clone, C: Deref<Target = T>> From<OneOrMore<T, C>> for Vec<T> {
     fn from(value: OneOrMore<T, C>) -> Self {
         match value {
@@ -60,30 +69,38 @@ impl<T: Clone, C: Deref<Target = T>> From<OneOrMore<T, C>> for Vec<T> {
     }
 }
 
-pub(self) fn whitespace_delimited<'a, O, F, E: ParseError<&'a str>>(
+pub(self) fn whitespace_delimited<I, O, F, E: ParseError<I>>(
     inner: F,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+) -> impl FnMut(I) -> IResult<I, O, E>
 where
-    F: Parser<&'a str, O, E>,
+    F: Parser<I, O, E>,
+    I: InputTakeAtPosition,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
 {
     delimited(multispace0, inner, multispace0)
 }
 
-pub(self) fn s_expression<'a, O, F, E: ParseError<&'a str> + ContextError<&'a str>>(
+pub(self) fn s_expression<I, O, F, E: ParseError<I> + ContextError<I>>(
     inner: F,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+) -> impl FnMut(I) -> IResult<I, O, E>
 where
-    F: Parser<&'a str, O, E>,
+    F: Parser<I, O, E>,
+    I: InputIter + InputTakeAtPosition + Slice<RangeFrom<usize>> + Clone,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+    <I as InputIter>::Item: AsChar,
 {
     s_expression_context("sexp", inner)
 }
 
-pub(self) fn s_expression_context<'a, O, F, E: ParseError<&'a str> + ContextError<&'a str>>(
+pub(self) fn s_expression_context<I, O, F, E: ParseError<I> + ContextError<I>>(
     ctx: &'static str,
     inner: F,
-) -> impl FnMut(&'a str) -> IResult<&'a str, O, E>
+) -> impl FnMut(I) -> IResult<I, O, E>
 where
-    F: Parser<&'a str, O, E>,
+    F: Parser<I, O, E>,
+    I: InputIter + InputTakeAtPosition + Slice<RangeFrom<usize>> + Clone,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+    <I as InputIter>::Item: AsChar,
 {
     context(
         ctx,

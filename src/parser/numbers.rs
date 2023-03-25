@@ -1,17 +1,66 @@
-use std::num::{ParseFloatError, ParseIntError};
-
+use super::whitespace_delimited;
 use nom::{
     branch::{alt, permutation},
-    bytes::complete::take_while1,
-    character::complete::{char, digit0, digit1, one_of},
-    combinator::{map, map_res, opt, recognize, success, value},
+    character::complete::{char, digit0, digit1},
+    combinator::{cut, map, map_res, opt, recognize, success, value},
     error::{context, ContextError, FromExternalError, ParseError},
     multi::many0_count,
     sequence::{pair, preceded, separated_pair, terminated, tuple},
-    IResult, Parser,
+    AsChar, IResult, InputIter, InputLength, InputTakeAtPosition, Offset, Slice,
+};
+use std::{
+    num::{ParseFloatError, ParseIntError},
+    ops::{RangeFrom, RangeTo},
+    str::FromStr,
 };
 
-use super::whitespace_delimited;
+pub trait ParseToRadix<T, E> {
+    fn parse_to_radix(&self, radix: Radix) -> Result<T, E>;
+}
+
+impl ParseToRadix<usize, ParseIntError> for &str {
+    fn parse_to_radix(&self, radix: Radix) -> Result<usize, ParseIntError> {
+        usize::from_str_radix(self, radix as u32)
+    }
+}
+
+pub trait ParseToResult<T, E> {
+    fn parse_to_res(&self) -> Result<T, E>;
+}
+
+impl<T: FromStr> ParseToResult<T, T::Err> for &str {
+    fn parse_to_res(&self) -> Result<T, T::Err> {
+        T::from_str(self)
+    }
+}
+
+pub trait ParseToNumber:
+    Slice<RangeFrom<usize>>
+    + Slice<RangeTo<usize>>
+    + Offset
+    + InputIter
+    + InputLength
+    + InputTakeAtPosition
+    + ParseToResult<f64, ParseFloatError>
+    + ParseToRadix<usize, ParseIntError>
+    + ParseToResult<u32, ParseIntError>
+    + Clone
+{
+}
+
+impl<T> ParseToNumber for T where
+    T: Slice<RangeFrom<usize>>
+        + Slice<RangeTo<usize>>
+        + Offset
+        + InputIter
+        + InputLength
+        + InputTakeAtPosition
+        + ParseToResult<f64, ParseFloatError>
+        + ParseToRadix<usize, ParseIntError>
+        + ParseToResult<u32, ParseIntError>
+        + Clone
+{
+}
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Numerical {
@@ -25,9 +74,11 @@ pub struct Prefix {
     pub exactness: Exactness,
 }
 
-fn prefix<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Prefix, E> {
+fn prefix<I, E: ParseError<I> + ContextError<I>>(input: I) -> IResult<I, Prefix, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     context(
         "prefix",
         map(permutation((radix, exactness)), |(radix, exactness)| {
@@ -43,14 +94,19 @@ pub struct Num {
 }
 
 pub(super) fn num<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseFloatError>
-        + FromExternalError<&'a str, ParseIntError>
-        + ContextError<&'a str>,
+    I,
+    E: ParseError<I>
+        + FromExternalError<I, ParseIntError>
+        + FromExternalError<I, ParseFloatError>
+        + ContextError<I>,
 >(
-    input: &'a str,
-) -> IResult<&str, Num, E> {
+    input: I,
+) -> IResult<I, Num, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar + Clone,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     let (input, prefix) = prefix(input)?;
     map(complex(prefix.radix), move |complex| Num {
         exactness: prefix.exactness,
@@ -65,13 +121,16 @@ pub struct Complex {
 }
 
 fn complex<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseFloatError>
-        + FromExternalError<&'a str, ParseIntError>,
+    I,
+    E: ParseError<I> + FromExternalError<I, ParseIntError> + FromExternalError<I, ParseFloatError>,
 >(
     radix: Radix,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Complex, E> {
+) -> impl FnMut(I) -> IResult<I, Complex, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     alt((
         (map(preceded(char('+'), imag(radix)), |u| Complex {
             real: None,
@@ -103,13 +162,16 @@ fn complex<
 }
 
 fn imag<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseIntError>
-        + FromExternalError<&'a str, ParseFloatError>,
+    I,
+    E: ParseError<I> + FromExternalError<I, ParseIntError> + FromExternalError<I, ParseFloatError>,
 >(
     radix: Radix,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Ureal, E> {
+) -> impl FnMut(I) -> IResult<I, Ureal, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     alt((
         map(char('i'), |_| Ureal::Decimal(1.0)),
         terminated(ureal(radix), char('i')),
@@ -123,13 +185,16 @@ pub enum Real {
 }
 
 fn real<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseIntError>
-        + FromExternalError<&'a str, ParseFloatError>,
+    I,
+    E: ParseError<I> + FromExternalError<I, ParseIntError> + FromExternalError<I, ParseFloatError>,
 >(
     radix: Radix,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Real, E> {
+) -> impl FnMut(I) -> IResult<I, Real, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     map(
         tuple((opt(alt((char('+'), char('-')))), ureal(radix))),
         |(sign, ur)| match sign {
@@ -148,13 +213,16 @@ pub enum Ureal {
 }
 
 fn ureal<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseIntError>
-        + FromExternalError<&'a str, ParseFloatError>,
+    I,
+    E: ParseError<I> + FromExternalError<I, ParseIntError> + FromExternalError<I, ParseFloatError>,
 >(
     radix: Radix,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Ureal, E> {
+) -> impl FnMut(I) -> IResult<I, Ureal, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     alt((
         map(decimal10, Ureal::Decimal),
         map(
@@ -169,24 +237,54 @@ fn ureal<
     ))
 }
 
-fn uinteger10<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
-    input: &'a str,
-) -> IResult<&'a str, usize, E> {
+fn uinteger10<I, E: ParseError<I> + FromExternalError<I, ParseIntError>>(
+    input: I,
+) -> IResult<I, usize, E>
+where
+    I: Slice<RangeFrom<usize>>
+        + Offset
+        + Slice<RangeTo<usize>>
+        + InputIter
+        + InputLength
+        + ParseToRadix<usize, ParseIntError>
+        + InputTakeAtPosition
+        + Clone,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar,
+{
     uinteger(Radix::Ten)(input)
 }
 
 pub type Uinteger = usize;
 
-fn uinteger<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
+fn uinteger<I, E: ParseError<I> + FromExternalError<I, ParseIntError>>(
     radix: Radix,
-) -> impl FnMut(&'a str) -> IResult<&'a str, Uinteger, E> {
+) -> impl FnMut(I) -> IResult<I, Uinteger, E>
+where
+    I: Slice<RangeFrom<usize>>
+        + Slice<RangeTo<usize>>
+        + Offset
+        + InputIter
+        + InputLength
+        + ParseToRadix<usize, ParseIntError>
+        + InputTakeAtPosition
+        + Clone,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar,
+{
     map_res(
         pair(
-            recognize(take_while1(move |chr: char| chr.is_digit(radix as u32))),
+            recognize(match radix {
+                Radix::Eight => digit1::<I, _>,
+                Radix::Sixteen => digit1,
+                Radix::Ten => digit1,
+                Radix::Two => digit1,
+            }),
             many0_count(char('#')),
         ),
         move |(digits, zeros)| {
-            usize::from_str_radix(digits, radix as u32)
+            digits
+                .parse_to_radix(radix)
                 .map(|u| u * (10_usize).pow(zeros.try_into().unwrap()))
         },
     )
@@ -194,37 +292,71 @@ fn uinteger<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntErro
 
 pub type Decimal10 = f64;
 
-fn sign<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, i32, E> {
+fn sign<I, E: ParseError<I>>(input: I) -> IResult<I, i32, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     alt((value(1, char('+')), value(-1, char('-')), success(1)))(input)
 }
 
 fn decimal10<
-    'a,
-    E: ParseError<&'a str>
-        + FromExternalError<&'a str, ParseIntError>
-        + FromExternalError<&'a str, ParseFloatError>,
+    I,
+    E: ParseError<I> + FromExternalError<I, ParseIntError> + FromExternalError<I, ParseFloatError>,
 >(
-    input: &'a str,
-) -> IResult<&'a str, Decimal10, E> {
+    input: I,
+) -> IResult<I, Decimal10, E>
+where
+    I: Slice<RangeFrom<usize>>
+        + Slice<RangeTo<usize>>
+        + Offset
+        + InputIter
+        + InputLength
+        + InputTakeAtPosition
+        + ParseToResult<f64, ParseFloatError>
+        + ParseToRadix<usize, ParseIntError>
+        + ParseToResult<u32, ParseIntError>
+        + Clone,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar,
+{
     alt((
-        map_res(tuple((recognize(uinteger10), exponent)), |(u, e)| {
-            let mut f = String::from(u);
-            f.push('e');
-            f.push_str(&e.to_string());
-            f.parse::<f64>()
-        }),
+        map_res(
+            tuple((recognize(uinteger10::<I, _>), exponent)),
+            |(u, e)| {
+                let mut f = String::from_iter(u.iter_elements().map(AsChar::as_char));
+                f.push('e');
+                f.push_str(&e.to_string());
+                f.parse::<f64>()
+            },
+        ),
         map_res(
             tuple((
                 alt((
-                    recognize(tuple((char::<&'a str, _>('.'), digit1))),
+                    recognize(tuple((char::<I, _>('.'), digit1))),
                     recognize(tuple((digit1, char('.'), digit0))),
                 )),
-                opt(recognize(tuple((preceded(one_of("esfdl"), sign), digit1)))),
+                opt(recognize(tuple((
+                    preceded(
+                        alt((
+                            char::<I, _>('e'),
+                            char('s'),
+                            char('f'),
+                            char('d'),
+                            char('l'),
+                        )),
+                        sign,
+                    ),
+                    digit1,
+                )))),
             )),
             |(base, exp)| {
-                let mut f = String::from(base);
+                let mut f = String::from_iter(base.iter_elements().map(AsChar::as_char));
                 if let Some(e) = exp {
-                    f.push_str(&e.replace(['e', 's', 'f', 'd', 'l'], "e"));
+                    f.extend(e.iter_elements().map(|c| match c.as_char() {
+                        'e' | 's' | 'f' | 'd' | 'l' => 'e',
+                        c => c,
+                    }));
                 }
                 f.parse::<f64>()
             },
@@ -232,12 +364,33 @@ fn decimal10<
     ))(input)
 }
 
-fn exponent<'a, E: ParseError<&'a str> + FromExternalError<&'a str, ParseIntError>>(
-    input: &'a str,
-) -> IResult<&'a str, i32, E> {
+fn exponent<I, E: ParseError<I> + FromExternalError<I, ParseIntError>>(
+    input: I,
+) -> IResult<I, i32, E>
+where
+    I: Slice<RangeFrom<usize>>
+        + InputIter
+        + Clone
+        + InputTakeAtPosition
+        + ParseToResult<u32, ParseIntError>,
+    <I as InputIter>::Item: AsChar,
+    <I as InputTakeAtPosition>::Item: AsChar,
+{
     map_res(
-        tuple((preceded(one_of("esfdl"), sign), digit1)),
-        |(sign, digits)| digits.parse::<u32>().map(|u| (u as i32 * sign)),
+        tuple((
+            preceded(
+                alt((
+                    char::<I, _>('e'),
+                    char('s'),
+                    char('f'),
+                    char('d'),
+                    char('l'),
+                )),
+                sign,
+            ),
+            cut(digit1),
+        )),
+        |(sign, digits)| digits.parse_to_res().map(|u| (u as i32 * sign)),
     )(input)
 }
 
@@ -248,7 +401,11 @@ pub enum Exactness {
     Exact,
 }
 
-fn exactness<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Exactness, E> {
+fn exactness<I, E: ParseError<I>>(input: I) -> IResult<I, Exactness, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     alt((
         value(Exactness::Inexact, char('i')),
         value(Exactness::Exact, char('e')),
@@ -264,7 +421,11 @@ pub enum Radix {
     Sixteen = 16,
 }
 
-fn radix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Radix, E> {
+fn radix<I, E: ParseError<I>>(input: I) -> IResult<I, Radix, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     map(
         opt(preceded(
             char('#'),
@@ -276,8 +437,7 @@ fn radix<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Radix, E> 
             )),
         )),
         |r| r.unwrap_or(Radix::Ten),
-    )
-    .parse(input)
+    )(input)
 }
 
 #[cfg(test)]
@@ -324,7 +484,7 @@ mod tests {
 
         for case in cases {
             assert_eq!(
-                prefix::<VerboseError<&str>>(case.input),
+                prefix::<_, VerboseError<&str>>(case.input),
                 Ok(("", case.prefix)),
                 "input: {}",
                 case.input
@@ -353,6 +513,12 @@ mod tests {
             }
         }
         let cases = [
+            case(
+                "-2.0i",
+                Exactness::Empty,
+                None,
+                Some(Real::Negative(Ureal::Decimal(2.0))),
+            ),
             case(
                 "+2.0i",
                 Exactness::Empty,
@@ -393,7 +559,7 @@ mod tests {
 
         for case in cases {
             assert_eq!(
-                num::<VerboseError<&str>>(case.input),
+                num::<_, VerboseError<&str>>(case.input),
                 Ok(("", case.num)),
                 "parsing {}",
                 case.input
@@ -424,7 +590,7 @@ mod tests {
 
         for case in cases {
             assert_eq!(
-                decimal10::<VerboseError<&str>>(case.input),
+                decimal10::<_, VerboseError<&str>>(case.input),
                 Ok(("", case.decimal)),
                 "parsing {}",
                 case.input

@@ -1,15 +1,18 @@
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{char, one_of, satisfy},
+    character::complete::{char, satisfy},
     combinator::{map, recognize, value},
     error::ParseError,
-    multi::many0_count,
+    multi::many0,
     sequence::tuple,
-    IResult,
+    AsChar, Compare, IResult, InputIter, InputLength, InputTake, Offset, Slice,
 };
-use std::fmt::{self, Display};
-use string_cache::{Atom, DefaultAtom};
+use std::{
+    fmt::{self, Display},
+    ops::{RangeFrom, RangeTo},
+};
+use string_cache::DefaultAtom;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Identifier {
@@ -30,13 +33,42 @@ impl Display for Identifier {
     }
 }
 
-pub(super) fn identifier<'a, E: ParseError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Identifier, E> {
+pub trait ToIdentifier<'a>:
+    Slice<RangeFrom<usize>>
+    + InputIter
+    + Offset
+    + InputLength
+    + Clone
+    + Compare<&'a str>
+    + InputTake
+    + Slice<RangeTo<usize>>
+    + Into<DefaultAtom>
+{
+}
+
+impl<'a, T> ToIdentifier<'a> for T where
+    T: Slice<RangeFrom<usize>>
+        + InputIter
+        + Offset
+        + InputLength
+        + Clone
+        + Compare<&'a str>
+        + InputTake
+        + Slice<RangeTo<usize>>
+        + Into<DefaultAtom>
+{
+}
+
+pub(super) fn identifier<'a, I, E: ParseError<I>>(input: I) -> IResult<I, Identifier, E>
+where
+    I: ToIdentifier<'a>,
+    <I as InputIter>::Item: AsChar + Copy,
+{
     alt((
-        map(recognize(tuple((initial, many0_count(subsequent)))), |s| {
-            Identifier::InitialSubsequent(Atom::from(s.to_lowercase()))
-        }),
+        map(
+            recognize(tuple((initial::<I, _>, many0(subsequent)))),
+            |s| Identifier::InitialSubsequent(s.into()),
+        ),
         value(Identifier::Plus, char('+')),
         value(Identifier::Minus, char('-')),
         value(Identifier::Ellipsis, tag("...")),
@@ -49,10 +81,41 @@ enum Initial {
     Other(char), // | ! | $ | % | & | * | / | : | < | = | > | ? | ~ | _ | ^
 }
 
-fn initial<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Initial, E> {
+impl From<Initial> for char {
+    fn from(value: Initial) -> char {
+        match value {
+            Initial::Letter(l) | Initial::Other(l) => l,
+        }
+    }
+}
+
+fn initial<I, E: ParseError<I>>(input: I) -> IResult<I, Initial, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     alt((
         map(letter, Initial::Letter),
-        map(one_of("!$%&*/:<=>?~_^"), Initial::Other),
+        map(
+            alt((
+                char('!'),
+                char('$'),
+                char('%'),
+                char('&'),
+                char('*'),
+                char('/'),
+                char(':'),
+                char('<'),
+                char('='),
+                char('>'),
+                char('?'),
+                char('~'),
+                char('_'),
+                char('^'),
+                char('"'),
+            )),
+            Initial::Other,
+        ),
     ))(input)
 }
 
@@ -63,23 +126,35 @@ enum Subsequent {
     Other(char), // . | + | -
 }
 
-fn subsequent<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Subsequent, E> {
+fn subsequent<I, E: ParseError<I>>(input: I) -> IResult<I, Subsequent, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar + Copy,
+{
     alt((
         map(initial, Subsequent::Initial),
         map(digit_ident, Subsequent::Digit),
-        map(one_of(".+-"), Subsequent::Other),
+        map(alt((char('.'), char('+'), char('-'))), Subsequent::Other),
     ))(input)
 }
 
 type Letter = char; // a | b | ... | z
 
-fn letter<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Letter, E> {
+fn letter<I, E: ParseError<I>>(input: I) -> IResult<I, Letter, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter,
+    <I as InputIter>::Item: AsChar,
+{
     satisfy(|c| c.is_alphabetic())(input)
 }
 
 type DigitIdent = char; // 0 | 1 | ... | 9
 
-pub(super) fn digit_ident<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, char, E> {
+pub(super) fn digit_ident<I, E: ParseError<I>>(input: I) -> IResult<I, char, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter,
+    <I as InputIter>::Item: AsChar,
+{
     satisfy(|c| c.is_ascii_digit())(input)
 }
 
@@ -92,7 +167,7 @@ mod test {
     #[test]
     fn test_identifier() {
         assert_eq!(
-            identifier::<VerboseError<&str>>("hello"),
+            identifier::<_, VerboseError<&str>>("hello"),
             Ok(("", Identifier::InitialSubsequent("hello".into())))
         )
     }

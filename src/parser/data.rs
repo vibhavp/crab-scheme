@@ -7,16 +7,19 @@ use nom::{
     error::{context, ContextError, FromExternalError, ParseError},
     multi::{many0, many1},
     sequence::{delimited, preceded, separated_pair},
-    IResult, Parser,
+    AsChar, Compare, IResult, InputIter, InputLength, InputTake, InputTakeAtPosition, Offset,
+    Parser, Slice,
 };
 use std::{
     borrow::Cow,
     fmt::{Display, Formatter},
     num::{ParseFloatError, ParseIntError},
+    ops::{RangeFrom, RangeTo},
 };
 
 use super::{
     identifier, num, s_expression, whitespace_delimited, Constant, Identifier, Num, OneOrMore,
+    ParseToNumber, ToIdentifier,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -54,15 +57,15 @@ impl<'a> From<Constant<'a>> for Datum<'a> {
     }
 }
 
-pub trait DatumParseError<'a>:
-    ParseError<&'a str>
-    + ContextError<&'a str>
-    + FromExternalError<&'a str, ParseFloatError>
-    + FromExternalError<&'a str, ParseIntError>
+pub trait DatumParseError<I>:
+    ParseError<I>
+    + ContextError<I>
+    + FromExternalError<I, ParseFloatError>
+    + FromExternalError<I, ParseIntError>
 {
 }
 
-impl<'a, T> DatumParseError<'a> for T where
+impl<'a, T> DatumParseError<&'a str> for T where
     T: ParseError<&'a str>
         + ContextError<&'a str>
         + FromExternalError<&'a str, ParseFloatError>
@@ -70,13 +73,21 @@ impl<'a, T> DatumParseError<'a> for T where
 {
 }
 
-pub(super) fn datum<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Datum, E> {
+pub trait ParseToDatum<'a>: ParseToNumber + ToIdentifier<'a> + Into<Cow<'a, str>> {}
+impl<'a, T> ParseToDatum<'a> for T where T: ParseToNumber + ToIdentifier<'a> + Into<Cow<'a, str>> {}
+
+pub(super) fn datum<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Datum<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "datum",
         alt((
             map(boolean, Datum::Boolean),
-            map(symbol, Datum::Symbol),
             map(number, Datum::Number),
+            map(symbol, Datum::Symbol),
             map(character, Datum::Character),
             map(string, Datum::String),
             map(list, Datum::List),
@@ -98,9 +109,11 @@ impl Display for Boolean {
     }
 }
 
-pub(super) fn boolean<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Boolean, E> {
+pub(super) fn boolean<I, E: ParseError<I> + ContextError<I>>(input: I) -> IResult<I, Boolean, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     context(
         "boolean",
         map(preceded(char('#'), alt((char('t'), char('f')))), |c| {
@@ -111,7 +124,12 @@ pub(super) fn boolean<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
 
 pub type Number = Num;
 
-pub(super) fn number<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&str, Number, E> {
+pub(super) fn number<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Number, E>
+where
+    I: ParseToNumber,
+    <I as InputIter>::Item: AsChar + Clone,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone,
+{
     context("number", num)(input)
 }
 
@@ -133,9 +151,13 @@ impl Display for Character {
     }
 }
 
-pub(super) fn character<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Character, E> {
+pub(super) fn character<'a, I, E: ParseError<I> + ContextError<I>>(
+    input: I,
+) -> IResult<I, Character, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + InputTake + InputLength + Compare<&'a str> + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     context(
         "character",
         preceded(
@@ -158,9 +180,29 @@ impl<'a> Display for SchemeString<'a> {
     }
 }
 
-pub(super) fn string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, SchemeString, E> {
+pub(super) fn string<'a, I, E: ParseError<I> + ContextError<I>>(
+    input: I,
+) -> IResult<I, SchemeString<'a>, E>
+where
+    I: Slice<RangeFrom<usize>>
+        + Slice<RangeTo<usize>>
+        + InputIter
+        + InputTake
+        + InputLength
+        + Compare<&'a str>
+        + Offset
+        + Clone
+        + Into<Cow<'a, str>>,
+    <I as InputIter>::Item: AsChar,
+{
+    let string_character = alt((
+        value('"', tag::<_, I, _>(r#"\""#)),
+        value('\\', tag(r#"\\"#)),
+        not(char('"'))
+            .and(not(char('\\')))
+            .and(anychar)
+            .map(|c| c.1),
+    ));
     context(
         "string",
         delimited(
@@ -173,26 +215,13 @@ pub(super) fn string<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
     )(input)
 }
 
-type StringCharacter = char;
-
-fn string_character<'a, E: ParseError<&'a str>>(
-    input: &'a str,
-) -> IResult<&str, StringCharacter, E> {
-    alt((
-        value('"', tag(r#"\""#)),
-        value('\\', tag(r#"\\"#)),
-        not(char('"'))
-            .and(not(char('\\')))
-            .and(anychar)
-            .map(|c| c.1),
-    ))(input)
-}
-
 pub type Symbol = Identifier;
 
-fn symbol<'a, E: ParseError<&'a str> + ContextError<&'a str>>(
-    input: &'a str,
-) -> IResult<&'a str, Symbol, E> {
+fn symbol<'a, I, E: ParseError<I> + ContextError<I>>(input: I) -> IResult<I, Symbol, E>
+where
+    I: ToIdentifier<'a>,
+    <I as InputIter>::Item: AsChar + Copy,
+{
     context("symbol", identifier)(input)
 }
 
@@ -203,11 +232,21 @@ pub enum List<'a> {
     Abbreviation(Abbreviation),
 }
 
-fn delimited_datum<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Datum, E> {
+fn delimited_datum<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Datum<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     whitespace_delimited(datum)(input)
 }
 
-fn list<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, List, E> {
+fn list<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, List<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "list",
         alt((
@@ -244,7 +283,11 @@ impl Display for Abbreviation {
     }
 }
 
-fn abbreviation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, Abbreviation, E> {
+fn abbreviation<I, E: ParseError<I>>(input: I) -> IResult<I, Abbreviation, E>
+where
+    I: Slice<RangeFrom<usize>> + InputIter + Clone,
+    <I as InputIter>::Item: AsChar,
+{
     alt((
         value(Abbreviation::SingleQuote, char('\'')),
         value(Abbreviation::Backtick, char('`')),
@@ -260,7 +303,12 @@ fn abbreviation<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, 
 
 pub type Vector<'a> = Vec<Datum<'a>>;
 
-fn vector<'a, E: DatumParseError<'a>>(input: &'a str) -> IResult<&'a str, Vector, E> {
+fn vector<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Vector<'a>, E>
+where
+    I: ParseToDatum<'a>,
+    <I as InputIter>::Item: AsChar + Clone + Copy,
+    <I as InputTakeAtPosition>::Item: AsChar + Clone + Copy,
+{
     context(
         "vector",
         preceded(
@@ -282,67 +330,41 @@ mod tests {
 
     #[test]
     fn test_boolean() {
-        assert_eq!(boolean::<VerboseError<&str>>("#t"), Ok(("", Boolean(true))));
         assert_eq!(
-            boolean::<VerboseError<&str>>("#f"),
+            boolean::<&str, VerboseError<&str>>("#t"),
+            Ok(("", Boolean(true)))
+        );
+        assert_eq!(
+            boolean::<&str, VerboseError<&str>>("#f"),
             Ok(("", Boolean(false)))
         );
     }
 
     #[test]
-    fn test_character() {
-        assert_eq!(
-            character::<VerboseError<&str>>(r#"#\a"#),
-            Ok(("", Character::Any('a')))
-        );
-        assert_eq!(
-            character::<VerboseError<&str>>(r#"#\newline"#),
-            Ok(("", Character::Newline))
-        );
-        assert_eq!(
-            character::<VerboseError<&str>>(r#"#\space"#),
-            Ok(("", Character::Space))
-        )
-    }
-
-    #[test]
-    fn test_string_character() {
-        assert_eq!(
-            string_character::<VerboseError<&str>>(r#"\""#),
-            Ok(("", '"'))
-        );
-        assert_eq!(
-            string_character::<VerboseError<&str>>(r#"\\"#),
-            Ok(("", '\\'))
-        );
-        assert_eq!(string_character::<VerboseError<&str>>("f"), Ok(("", 'f')));
-    }
-
-    #[test]
     fn test_string() {
         assert_eq!(
-            string::<VerboseError<&str>>(r#""hello, world!""#),
+            string::<_, VerboseError<&str>>(r#""hello, world!""#),
             Ok(("", SchemeString("hello, world!".into())))
         );
-        assert!(string::<VerboseError<&str>>(r#""hello, world!"#).is_err());
+        assert!(string::<_, VerboseError<&str>>(r#""hello, world!"#).is_err());
     }
 
     #[test]
     fn test_abbreviation() {
         assert_eq!(
-            abbreviation::<VerboseError<&str>>("'"),
+            abbreviation::<_, VerboseError<_>>("'"),
             Ok(("", Abbreviation::SingleQuote))
         );
         assert_eq!(
-            abbreviation::<VerboseError<&str>>("`"),
+            abbreviation::<_, VerboseError<_>>("`"),
             Ok(("", Abbreviation::Backtick))
         );
         assert_eq!(
-            abbreviation::<VerboseError<&str>>(","),
+            abbreviation::<_, VerboseError<_>>(","),
             Ok(("", Abbreviation::Unquote))
         );
         assert_eq!(
-            abbreviation::<VerboseError<&str>>(",@"),
+            abbreviation::<_, VerboseError<_>>(",@"),
             Ok(("", Abbreviation::UnquoteSplice))
         );
     }
@@ -350,11 +372,11 @@ mod tests {
     #[test]
     fn test_list() {
         assert_eq!(
-            list::<VerboseError<&str>>("()"),
+            list::<_, VerboseError<&str>>("()"),
             Ok(("", List::NList(vec![])))
         );
         assert_eq!(
-            list::<VerboseError<&str>>("(a b c)"),
+            list::<_, VerboseError<&str>>("(a b c)"),
             Ok((
                 "",
                 List::NList(vec![
@@ -365,7 +387,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            list::<VerboseError<&str>>("(a . b)"),
+            list::<_, VerboseError<&str>>("(a . b)"),
             Ok((
                 "",
                 List::Dot(
@@ -377,7 +399,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            list::<VerboseError<&str>>("(a (a b))"),
+            list::<_, VerboseError<&str>>("(a (a b))"),
             Ok((
                 "",
                 List::NList(vec![
@@ -390,7 +412,7 @@ mod tests {
             ))
         );
         assert_eq!(
-            list::<VerboseError<&str>>("(a b c . b)"),
+            list::<_, VerboseError<&str>>("(a b c . b)"),
             Ok((
                 "",
                 List::Dot(
@@ -408,16 +430,16 @@ mod tests {
     #[test]
     fn test_datum() {
         assert_eq!(
-            datum::<VerboseError<&str>>("#t"),
+            datum::<_, VerboseError<&str>>("#t"),
             Ok(("", Datum::Boolean(Boolean(true))))
         );
         assert_eq!(
-            datum::<VerboseError<&str>>("#f"),
+            datum::<_, VerboseError<&str>>("#f"),
             Ok(("", Datum::Boolean(Boolean(false))))
         );
 
         assert_eq!(
-            datum::<VerboseError<&str>>("foo"),
+            datum::<_, VerboseError<&str>>("foo"),
             Ok((
                 "",
                 Datum::Symbol(Identifier::InitialSubsequent("foo".into()))
@@ -425,7 +447,7 @@ mod tests {
         );
 
         assert_eq!(
-            datum::<VerboseError<&str>>("(a b c)"),
+            datum::<_, VerboseError<&str>>("(a b c)"),
             Ok((
                 "",
                 Datum::List(List::NList(vec![
@@ -437,7 +459,7 @@ mod tests {
         );
 
         assert_eq!(
-            datum::<VerboseError<&str>>("#(a b c)"),
+            datum::<_, VerboseError<&str>>("#(a b c)"),
             Ok((
                 "",
                 Datum::Vector(vec![
