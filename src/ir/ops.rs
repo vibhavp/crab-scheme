@@ -1,4 +1,4 @@
-use super::{IRExpression, Variable, WithIRNodeNames};
+use super::{IRExpression, Procedure, Variable, WithIRNodeNames};
 use std::fmt::{Display, Error, Formatter};
 
 #[derive(Debug, Clone)]
@@ -14,7 +14,7 @@ impl<'a> Display for WithIRNodeNames<'a, &Operation<'a>> {
         match &self.1 {
             Operation::Define(v) => write!(f, "define {}", v),
             Operation::Set(v, e) => write!(f, "set {} = {}", v, WithIRNodeNames(self.0, e)),
-            Operation::Application(app) => write!(f, "{}", app),
+            Operation::Application(app) => write!(f, "{}", WithIRNodeNames(self.0, app)),
             Operation::Nop => write!(f, "nop"),
         }
     }
@@ -22,16 +22,31 @@ impl<'a> Display for WithIRNodeNames<'a, &Operation<'a>> {
 
 #[derive(Debug, Clone)]
 pub struct Application {
-    pub procedure: Variable,
+    pub procedure: CallTarget,
     pub args: Vec<Variable>,
 }
 
-impl Display for Application {
+#[derive(Debug, Clone)]
+pub enum CallTarget {
+    Static(Procedure),
+    Variable(Variable),
+}
+
+impl<'a> Display for WithIRNodeNames<'a, &CallTarget> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
-        write!(f, "{}(", self.procedure)?;
-        for (idx, arg) in self.args.iter().enumerate() {
+        match &self.1 {
+            CallTarget::Static(p) => write!(f, "{}", WithIRNodeNames(self.0, p)),
+            CallTarget::Variable(var) => write!(f, "{}", var),
+        }
+    }
+}
+
+impl<'a> Display for WithIRNodeNames<'a, &Application> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        write!(f, "{}(", WithIRNodeNames(self.0, &self.1.procedure))?;
+        for (idx, arg) in self.1.args.iter().enumerate() {
             write!(f, "{}", arg)?;
-            if idx != self.args.len() - 1 {
+            if idx != self.1.args.len() - 1 {
                 write!(f, ", ")?;
             }
         }
@@ -59,6 +74,6 @@ pub enum MathOp {
 }
 
 #[derive(Debug, Clone)]
-pub enum Primitive {
+pub enum PrimitiveApplication {
     Math(MathOp, Variable, Variable),
 }

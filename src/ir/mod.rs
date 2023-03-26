@@ -3,6 +3,7 @@ mod node;
 mod ops;
 mod proc;
 mod types;
+pub mod validate;
 mod var;
 
 use slotmap::{new_key_type, HopSlotMap, SecondaryMap};
@@ -10,7 +11,7 @@ use std::fmt::{Display, Error, Formatter};
 
 pub use self::control::{ControlFlow, Target};
 pub use node::Node;
-pub use ops::{Application, Operation, Primitive};
+pub use ops::{Application, CallTarget, Operation, PrimitiveApplication};
 pub use proc::Procedure;
 pub use types::Type;
 pub use var::Variable;
@@ -145,7 +146,7 @@ impl<'a> Display for IR<'a> {
 
 #[derive(Debug, Clone)]
 pub enum IRExpression<'a> {
-    Primitive(Primitive),
+    Primitive(PrimitiveApplication),
     Procedure(Procedure),
     Variable(Variable),
     Constant(Datum<'a>),
@@ -158,6 +159,7 @@ impl<'a> Display for WithIRNodeNames<'a, &IRExpression<'a>> {
             IRExpression::Variable(v) => write!(f, "{}", v),
             IRExpression::Constant(d) => write!(f, "{}", d),
             IRExpression::Procedure(p) => write!(f, "{}", WithIRNodeNames(self.0, p)),
+            IRExpression::Application(a) => write!(f, "{}", WithIRNodeNames(self.0, a)),
             _ => todo!(),
         }
     }

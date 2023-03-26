@@ -5,8 +5,11 @@ mod idents;
 mod numbers;
 mod programs;
 
-use nom_locate::LocatedSpan;
-use std::ops::{Deref, RangeFrom};
+use nom_locate::{position, LocatedSpan};
+use std::{
+    borrow::Borrow,
+    ops::{Deref, RangeFrom, RangeTo},
+};
 
 pub use data::*;
 pub use defs::*;
@@ -19,7 +22,7 @@ use nom::{
     combinator::cut,
     error::{context, ContextError, ParseError},
     sequence::delimited,
-    AsChar, IResult, InputIter, InputTakeAtPosition, Parser, Slice,
+    AsBytes, AsChar, IResult, InputIter, InputTake, InputTakeAtPosition, Offset, Parser, Slice,
 };
 pub use numbers::*;
 
@@ -112,8 +115,65 @@ where
     )
 }
 
+trait Position:
+    InputIter + InputTake + Slice<RangeTo<usize>> + Slice<RangeFrom<usize>> + AsBytes + Offset
+{
+}
+
+impl<T> Position for T where
+    T: InputIter + InputTake + Slice<RangeTo<usize>> + Slice<RangeFrom<usize>> + AsBytes + Offset
+{
+}
+
+pub(self) fn with_position<I, O, F, X, E: ParseError<Span<I, X>>>(
+    mut inner: F,
+) -> impl FnMut(Span<I, X>) -> IResult<Span<I, X>, WithPosition<O, I, X>, E>
+where
+    F: Parser<Span<I, X>, O, E>,
+    I: InputIter + InputTake + Slice<RangeTo<usize>> + Slice<RangeFrom<usize>> + AsBytes + Offset,
+    X: Clone,
+{
+    move |input| {
+        let (input, pos) = position(input)?;
+        let (input, output) = inner.parse(input)?;
+
+        Ok((
+            input,
+            WithPosition {
+                position: pos,
+                token: output,
+            },
+        ))
+    }
+}
+
+type Span<I, X> = LocatedSpan<I, X>;
+
 #[derive(Debug, Clone)]
 pub struct WithPosition<T, I, X = ()> {
-    pub position: LocatedSpan<I, X>,
+    pub position: Span<I, X>,
     pub token: T,
+}
+
+impl<T, I, X> Deref for WithPosition<T, I, X> {
+    type Target = T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.token
+    }
+}
+
+impl<T, I, X> AsRef<T> for WithPosition<T, I, X>
+where
+    <WithPosition<T, I, X> as Deref>::Target: AsRef<T>,
+{
+    fn as_ref(&self) -> &T {
+        &self.token
+    }
+}
+
+impl<T, I, X> Borrow<T> for WithPosition<T, I, X> {
+    fn borrow(&self) -> &T {
+        &self.token
+    }
 }

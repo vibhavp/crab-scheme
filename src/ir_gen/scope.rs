@@ -1,12 +1,13 @@
 use crate::{ir::Variable, parser::Variable as ParsedVariable};
 use std::collections::HashMap;
 
-pub(super) struct LexicalScopeManager {
+#[derive(Debug)]
+pub struct LexicalScopeManager {
     scopes: Vec<Scope>,
     cur_idx: usize,
 }
 
-#[derive(Default)]
+#[derive(Debug, Default)]
 struct Scope {
     variables: Vec<Variable>,
     names: HashMap<ParsedVariable, usize>,

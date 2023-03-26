@@ -12,7 +12,7 @@ use nom::{
 };
 use std::{
     borrow::Cow,
-    fmt::{Display, Formatter},
+    fmt::{Display, Error, Formatter},
     num::{ParseFloatError, ParseIntError},
     ops::{RangeFrom, RangeTo},
 };
@@ -230,6 +230,36 @@ pub enum List<'a> {
     NList(Vec<Datum<'a>>),
     Dot(OneOrMore<Datum<'a>>, Box<Datum<'a>>),
     Abbreviation(Abbreviation),
+}
+
+impl<'a> Display for List<'a> {
+    fn fmt(&self, f: &mut Formatter) -> Result<(), Error> {
+        fn print_elems<'a>(elems: &Vec<Datum<'a>>, f: &mut Formatter) -> Result<(), Error> {
+            for (idx, elem) in elems.iter().enumerate() {
+                write!(f, "{}", elem)?;
+                if idx != elems.len() - 1 {
+                    write!(f, " ")?;
+                }
+            }
+            Ok(())
+        }
+        match self {
+            Self::NList(elems) => {
+                write!(f, "(")?;
+                print_elems(elems, f)?;
+                write!(f, ")")
+            }
+            Self::Dot(elems, cdr) => {
+                write!(f, "(")?;
+                match elems {
+                    OneOrMore::One(d) => write!(f, "{}", d)?,
+                    OneOrMore::More(e) => print_elems(e, f)?,
+                }
+                write!(f, " . {}", cdr)
+            }
+            _ => todo!(),
+        }
+    }
 }
 
 fn delimited_datum<'a, I, E: DatumParseError<I>>(input: I) -> IResult<I, Datum<'a>, E>
