@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -120,9 +118,13 @@ where
 
     let application = context(
         "application",
-        map(many1(whitespace_delimited(expression)), |exprs| {
-            Expression::Application(exprs.into())
-        }),
+        map(
+            verify(
+                many1(whitespace_delimited(expression)),
+                |exprs: &Vec<Expression>| !matches!(exprs[0], Expression::Constant(_)),
+            ),
+            |exprs| Expression::Application(exprs.into()),
+        ),
     );
     let sexp = alt((quote, lambda, if_expr, set, let_expr, application));
 
@@ -237,8 +239,10 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::parser::atoms::*;
     use data::{List, Symbol};
-    use nom::error::VerboseError;
+    use nom::error::{ErrorKind, VerboseError, VerboseErrorKind};
+    use std::assert_matches::assert_matches;
 
     #[test]
     fn test_expression() {
@@ -260,9 +264,9 @@ mod test {
             Ok((
                 "",
                 Expression::Application(OneOrMore::More(vec![
-                    Expression::Variable(Variable::Plus),
-                    Expression::Variable(Variable::InitialSubsequent("a".into())),
-                    Expression::Variable(Variable::InitialSubsequent("b".into()))
+                    Expression::Variable(ident_atom!("+")),
+                    Expression::Variable(IdentifierAtom::from("a")),
+                    Expression::Variable(IdentifierAtom::from("b"))
                 ]))
             ))
         );
@@ -271,9 +275,9 @@ mod test {
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
-                    Datum::Symbol(Symbol::Plus),
-                    Datum::Symbol(Symbol::InitialSubsequent("a".into())),
-                    Datum::Symbol(Symbol::InitialSubsequent("b".into()))
+                    Datum::Symbol(ident_atom!("+")),
+                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(IdentifierAtom::from("b"))
                 ])))
             ))
         );
@@ -282,10 +286,8 @@ mod test {
             Ok((
                 "",
                 Expression::Set {
-                    var: Variable::InitialSubsequent("foo".into()),
-                    expr: Box::new(Expression::Variable(Variable::InitialSubsequent(
-                        "bar".into()
-                    )))
+                    var: IdentifierAtom::from("foo"),
+                    expr: Box::new(Expression::Variable(IdentifierAtom::from("bar")))
                 }
             ))
         );
@@ -294,11 +296,11 @@ mod test {
             Ok((
                 "",
                 Expression::Set {
-                    var: Variable::InitialSubsequent("foo".into()),
+                    var: IdentifierAtom::from("foo"),
                     expr: Box::new(Expression::Quote(Datum::List(List::NList(vec![
-                        Datum::Symbol(Symbol::Plus),
-                        Datum::Symbol(Symbol::InitialSubsequent("a".into())),
-                        Datum::Symbol(Symbol::InitialSubsequent("b".into()))
+                        Datum::Symbol(ident_atom!("+")),
+                        Datum::Symbol(IdentifierAtom::from("a")),
+                        Datum::Symbol(IdentifierAtom::from("b"))
                     ]))))
                 }
             ))
@@ -308,9 +310,9 @@ mod test {
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
-                    Datum::Symbol(Symbol::Plus),
-                    Datum::Symbol(Symbol::InitialSubsequent("a".into())),
-                    Datum::Symbol(Symbol::InitialSubsequent("b".into()))
+                    Datum::Symbol(ident_atom!("+")),
+                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(IdentifierAtom::from("b"))
                 ])))
             ))
         );
@@ -320,16 +322,12 @@ mod test {
                 "",
                 Expression::If {
                     cond: Box::new(Expression::Application(OneOrMore::More(vec![
-                        Expression::Variable(Variable::InitialSubsequent(">".into())),
-                        Expression::Variable(Variable::InitialSubsequent("a".into())),
-                        Expression::Variable(Variable::InitialSubsequent("b".into()))
+                        Expression::Variable(ident_atom!(">")),
+                        Expression::Variable(IdentifierAtom::from("a")),
+                        Expression::Variable(IdentifierAtom::from("b"))
                     ]))),
-                    then: Box::new(Expression::Variable(Variable::InitialSubsequent(
-                        "foo".into()
-                    ))),
-                    else_expr: Some(Box::new(Expression::Variable(Variable::InitialSubsequent(
-                        "bar".into()
-                    )))),
+                    then: Box::new(Expression::Variable(IdentifierAtom::from("foo"))),
+                    else_expr: Some(Box::new(Expression::Variable(IdentifierAtom::from("bar")))),
                 }
             ))
         );
@@ -338,12 +336,10 @@ mod test {
             Ok((
                 "",
                 Expression::Lambda {
-                    formals: Formals::Rest(Variable::InitialSubsequent("foo".into())),
+                    formals: Formals::Rest(IdentifierAtom::from("foo")),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("bar".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
                     )
                 }
             ))
@@ -354,15 +350,13 @@ mod test {
                 "",
                 Expression::Lambda {
                     formals: Formals::Variables(vec![
-                        Variable::InitialSubsequent("foo".into()),
-                        Variable::InitialSubsequent("a1".into()),
-                        Variable::InitialSubsequent("a2".into())
+                        IdentifierAtom::from("foo"),
+                        IdentifierAtom::from("a1"),
+                        IdentifierAtom::from("a2")
                     ]),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("bar".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
                     )
                 }
             ))
@@ -374,16 +368,14 @@ mod test {
                 Expression::Lambda {
                     formals: Formals::VariablesRest(
                         OneOrMore::More(vec![
-                            Variable::InitialSubsequent("foo".into()),
-                            Variable::InitialSubsequent("a1".into()),
+                            IdentifierAtom::from("foo"),
+                            IdentifierAtom::from("a1"),
                         ]),
-                        Variable::InitialSubsequent("rest".into())
+                        IdentifierAtom::from("rest")
                     ),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("bar".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
                     )
                 }
             ))
@@ -395,19 +387,17 @@ mod test {
                 Expression::Let(Let::SimpleLet(
                     vec![
                         Binding {
-                            var: Variable::InitialSubsequent("a".into()),
-                            expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                            var: IdentifierAtom::from("a"),
+                            expr: Expression::Variable(IdentifierAtom::from("b"))
                         },
                         Binding {
-                            var: Variable::InitialSubsequent("c".into()),
-                            expr: Expression::Variable(Variable::InitialSubsequent("d".into()))
+                            var: IdentifierAtom::from("c"),
+                            expr: Expression::Variable(IdentifierAtom::from("d"))
                         },
                     ],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("c".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
                     )
                 ))
             ))
@@ -417,16 +407,14 @@ mod test {
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
-                    Variable::InitialSubsequent("f".into()),
+                    IdentifierAtom::from("f"),
                     vec![Binding {
-                        var: Variable::InitialSubsequent("a".into()),
-                        expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                        var: IdentifierAtom::from("a"),
+                        expr: Expression::Variable(IdentifierAtom::from("b"))
                     }],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("c".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
                     )
                 ))
             ))
@@ -436,25 +424,50 @@ mod test {
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
-                    Variable::InitialSubsequent("f".into()),
+                    IdentifierAtom::from("f"),
                     vec![
                         Binding {
-                            var: Variable::InitialSubsequent("a".into()),
-                            expr: Expression::Variable(Variable::InitialSubsequent("b".into()))
+                            var: IdentifierAtom::from("a"),
+                            expr: Expression::Variable(IdentifierAtom::from("b"))
                         },
                         Binding {
-                            var: Variable::InitialSubsequent("c".into()),
-                            expr: Expression::Variable(Variable::InitialSubsequent("d".into()))
+                            var: IdentifierAtom::from("c"),
+                            expr: Expression::Variable(IdentifierAtom::from("d"))
                         },
                     ],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(
-                            Variable::InitialSubsequent("c".into())
-                        )))
+                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
                     )
                 ))
             ))
         );
+    }
+
+    #[test]
+    fn test_invalid_application() {
+        assert_matches!(
+            expression::<_, VerboseError<&str>>("(#t foo bar)"),
+            Err(nom::Err::Error(VerboseError { errors }))
+            if matches!(errors.as_slice(), [(_, VerboseErrorKind::Nom(ErrorKind::Verify)), ..])
+        );
+
+        assert_matches!(
+            expression::<_, VerboseError<&str>>("(123 foo bar)"),
+            Err(nom::Err::Error(VerboseError { errors }))
+            if matches!(errors.as_slice(), [(_, VerboseErrorKind::Nom(ErrorKind::Verify)), ..])
+        );
+
+        assert_matches!(
+            expression::<_, VerboseError<&str>>("(\"foo\" foo bar)"),
+            Err(nom::Err::Error(VerboseError { errors }))
+            if matches!(errors.as_slice(), [(_, VerboseErrorKind::Nom(ErrorKind::Verify)), ..])
+        );
+
+        assert_matches!(
+            expression::<_, VerboseError<&str>>(r"(#\c foo bar)"),
+            Err(nom::Err::Error(VerboseError { errors }))
+            if matches!(errors.as_slice(), [(_, VerboseErrorKind::Nom(ErrorKind::Verify)), ..])
+        )
     }
 }

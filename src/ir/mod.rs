@@ -2,14 +2,16 @@ mod control;
 mod node;
 mod ops;
 mod proc;
+mod query;
 mod types;
-pub mod validate;
+// pub mod validate;
 mod var;
 
 use slotmap::{new_key_type, HopSlotMap, SecondaryMap};
 use std::fmt::{Display, Error, Formatter};
 
 pub use self::control::{ControlFlow, Target};
+use self::query::{IRQuery, TraversalError};
 pub use node::Node;
 pub use ops::{Application, CallTarget, Operation, PrimitiveApplication};
 pub use proc::Procedure;
@@ -40,63 +42,7 @@ pub struct IR<'a> {
 }
 
 impl<'a> IR<'a> {
-    pub fn traverse_from<F, B>(&self, node: IRNodeRef, mut visitor: F) -> Option<B>
-    where
-        F: FnMut(usize, &Node<'a>) -> std::ops::ControlFlow<B, ()>,
-    {
-        let mut stack = Vec::new();
-        let mut visited_nodes = SecondaryMap::new();
-
-        fn push_new_node(
-            stack: &mut Vec<IRNodeRef>,
-            map: &mut SecondaryMap<IRNodeRef, ()>,
-            node_ref: IRNodeRef,
-        ) {
-            if !map.contains_key(node_ref) {
-                stack.push(node_ref);
-                map.insert(node_ref, ());
-            }
-        }
-
-        push_new_node(&mut stack, &mut visited_nodes, node);
-
-        while let Some(node_ref) = stack.pop() {
-            let node = self.nodes.get(node_ref).unwrap();
-            let node_name = self.node_names.get(node_ref).unwrap();
-
-            if let std::ops::ControlFlow::Break(b) = visitor(*node_name, node) {
-                return Some(b);
-            }
-
-            match &node.1 {
-                Some(ControlFlow::Goto(target)) => {
-                    push_new_node(&mut stack, &mut visited_nodes, target.0.get());
-                }
-                Some(ControlFlow::BranchIf {
-                    cond,
-                    target,
-                    finally,
-                }) => {
-                    push_new_node(&mut stack, &mut visited_nodes, finally.0.get());
-                    push_new_node(&mut stack, &mut visited_nodes, target.0.get());
-                }
-                Some(ControlFlow::Branch {
-                    cond,
-                    target_then,
-                    target_else,
-                    finally,
-                }) => {
-                    push_new_node(&mut stack, &mut visited_nodes, finally.0.get());
-                    push_new_node(&mut stack, &mut visited_nodes, target_else.0.get());
-                    push_new_node(&mut stack, &mut visited_nodes, target_then.0.get());
-                }
-                _ => {}
-            }
-        }
-        None
-    }
-
-    pub fn traverse<F, B>(&self, visitor: F) -> Option<B>
+    pub fn traverse<F, B>(&'a self, visitor: F) -> Result<Option<B>, TraversalError>
     where
         F: FnMut(usize, &Node<'a>) -> std::ops::ControlFlow<B, ()>,
     {
@@ -130,7 +76,7 @@ impl<'a, 'b> Display for DisplayFrom<'a, 'b> {
                 std::ops::ControlFlow::Continue(())
             }
         });
-        if let Some(err) = break_err {
+        if let Ok(Some(err)) = break_err {
             Err(err)
         } else {
             Ok(())

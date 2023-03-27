@@ -2,36 +2,20 @@ use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::{char, satisfy},
-    combinator::{map, recognize, value},
+    combinator::{map, recognize},
     error::ParseError,
     multi::many0,
     sequence::tuple,
     AsChar, Compare, IResult, InputIter, InputLength, InputTake, Offset, Slice,
 };
-use std::{
-    fmt::{self, Display},
-    ops::{RangeFrom, RangeTo},
-};
-use string_cache::DefaultAtom;
+use std::ops::{RangeFrom, RangeTo};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Identifier {
-    InitialSubsequent(DefaultAtom),
-    Plus,
-    Minus,
-    Ellipsis,
+#[macro_use]
+pub mod atoms {
+    include!(concat!(env!("OUT_DIR"), "/identifier_atom.rs"));
 }
 
-impl Display for Identifier {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Identifier::InitialSubsequent(s) => write!(f, "{}", s),
-            Identifier::Plus => write!(f, "+"),
-            Identifier::Minus => write!(f, "-"),
-            Identifier::Ellipsis => write!(f, "..."),
-        }
-    }
-}
+pub type Identifier = atoms::IdentifierAtom;
 
 pub trait ToIdentifier<'a>:
     Slice<RangeFrom<usize>>
@@ -42,7 +26,7 @@ pub trait ToIdentifier<'a>:
     + Compare<&'a str>
     + InputTake
     + Slice<RangeTo<usize>>
-    + Into<DefaultAtom>
+    + Into<Identifier>
 {
 }
 
@@ -55,7 +39,7 @@ impl<'a, T> ToIdentifier<'a> for T where
         + Compare<&'a str>
         + InputTake
         + Slice<RangeTo<usize>>
-        + Into<DefaultAtom>
+        + Into<Identifier>
 {
 }
 
@@ -64,15 +48,15 @@ where
     I: ToIdentifier<'a>,
     <I as InputIter>::Item: AsChar + Copy,
 {
-    alt((
-        map(
+    map(
+        alt((
             recognize(tuple((initial::<I, _>, many0(subsequent)))),
-            |s| Identifier::InitialSubsequent(s.into()),
-        ),
-        value(Identifier::Plus, char('+')),
-        value(Identifier::Minus, char('-')),
-        value(Identifier::Ellipsis, tag("...")),
-    ))(input)
+            recognize(char('+')),
+            recognize(char('-')),
+            recognize(tag("...")),
+        )),
+        |s| s.into(),
+    )(input)
 }
 
 #[derive(Debug, Clone)]
@@ -168,7 +152,7 @@ mod test {
     fn test_identifier() {
         assert_eq!(
             identifier::<_, VerboseError<&str>>("hello"),
-            Ok(("", Identifier::InitialSubsequent("hello".into())))
+            Ok(("", Identifier::from("hello")))
         )
     }
 }

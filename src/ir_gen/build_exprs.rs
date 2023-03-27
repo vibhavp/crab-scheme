@@ -1,6 +1,6 @@
 use crate::{
     ir::{Application, CallTarget, ControlFlow, IRExpression, Node, Operation, Target},
-    parser::{Binding, Expression, Formals, Let, Variable as ParsedVariable},
+    parser::{Binding, Expression, Formals, Identifier, Let, Variable as ParsedVariable},
 };
 use thiserror::Error;
 use tracing::instrument;
@@ -124,7 +124,13 @@ impl<'a> BuildTree<'a> for Expression<'a> {
             Expression::Let(let_expr) => Ok(let_expr.build(context)?),
             Expression::Application(app) => {
                 let mut call: Vec<_> = app.into();
-
+                // match call[0] {
+                //     Expression::Variable(Identifier::Plus) => {}
+                //     Expression::Variable(Identifier::)
+                //     }
+                // if let Expression::Variable(ident) = &call[0] {
+                //     match ident {}
+                // }
                 let (proc_var, _) = context.push_define(None, true);
                 {
                     let proc_expr = call.remove(0).build(context)?;

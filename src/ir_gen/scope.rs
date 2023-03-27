@@ -84,9 +84,9 @@ mod test {
     fn lexical_scope_basic() {
         let mut manager = LexicalScopeManager::default();
 
-        let v1 = ParsedVariable::InitialSubsequent("foo".into());
-        let v2 = ParsedVariable::InitialSubsequent("bar".into());
-        let v3 = ParsedVariable::InitialSubsequent("baz".into());
+        let v1 = ParsedVariable::from("foo");
+        let v2 = ParsedVariable::from("bar");
+        let v3 = ParsedVariable::from("baz");
 
         let ir_v1 = manager.add_variable(v1.clone());
         assert_eq!(manager.lookup_variable(&v1), Some(ir_v1));

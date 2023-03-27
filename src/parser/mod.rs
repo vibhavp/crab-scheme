@@ -1,7 +1,8 @@
+#[macro_use]
+mod idents;
 mod data;
 mod defs;
 mod exprs;
-mod idents;
 mod numbers;
 mod programs;
 
@@ -63,11 +64,23 @@ impl From<OneOrMore<Identifier, Identifier>> for Vec<Identifier> {
     }
 }
 
-impl<T: Clone, C: Deref<Target = T>> From<OneOrMore<T, C>> for Vec<T> {
-    fn from(value: OneOrMore<T, C>) -> Self {
+impl<T: Clone> From<OneOrMore<T, Box<T>>> for Vec<T> {
+    fn from(value: OneOrMore<T, Box<T>>) -> Self {
         match value {
             OneOrMore::One(b) => vec![(*b).clone()],
             OneOrMore::More(b) => b,
+        }
+    }
+}
+
+impl<T: Clone, C> OneOrMore<T, C>
+where
+    C: Borrow<T>,
+{
+    fn first(&self) -> &T {
+        match self {
+            Self::One(c) => c.borrow(),
+            Self::More(v) => &v[0],
         }
     }
 }

@@ -62,18 +62,26 @@ pub enum MathOp {
     Divide,
     Pow,
     Modulo,
+}
 
-    BitwiseAnd,
-    BitwiseOr,
-    BitwiseNot,
-    BitwiseXor,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BooleanOp {
+    And,
+    Or,
+    Not,
+}
 
-    LogicalAnd,
-    LogicalOr,
-    LogicalNot,
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub enum BitwiseOp {
+    And,
+    Or,
+    Not,
+    Xor,
 }
 
 #[derive(Debug, Clone)]
 pub enum PrimitiveApplication {
     Math(MathOp, Variable, Variable),
+    Boolean(BooleanOp, Variable, Variable),
+    BitwiseOp(BitwiseOp, Variable, Variable),
 }

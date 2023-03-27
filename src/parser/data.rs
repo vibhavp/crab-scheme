@@ -356,6 +356,8 @@ where
 mod tests {
     use nom::error::VerboseError;
 
+    use crate::parser::atoms::IdentifierAtom;
+
     use super::*;
 
     #[test]
@@ -410,9 +412,9 @@ mod tests {
             Ok((
                 "",
                 List::NList(vec![
-                    Datum::Symbol(Identifier::InitialSubsequent("a".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("b".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("c".into()))
+                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(IdentifierAtom::from("b")),
+                    Datum::Symbol(IdentifierAtom::from("c"))
                 ])
             ))
         );
@@ -421,10 +423,8 @@ mod tests {
             Ok((
                 "",
                 List::Dot(
-                    OneOrMore::One(Box::new(Datum::Symbol(Identifier::InitialSubsequent(
-                        "a".into()
-                    )))),
-                    Box::new(Datum::Symbol(Identifier::InitialSubsequent("b".into())))
+                    OneOrMore::One(Box::new(Datum::Symbol(IdentifierAtom::from("a")))),
+                    Box::new(Datum::Symbol(IdentifierAtom::from("b")))
                 )
             ))
         );
@@ -433,10 +433,10 @@ mod tests {
             Ok((
                 "",
                 List::NList(vec![
-                    Datum::Symbol(Identifier::InitialSubsequent("a".into())),
+                    Datum::Symbol(IdentifierAtom::from("a")),
                     Datum::List(List::NList(vec![
-                        Datum::Symbol(Identifier::InitialSubsequent("a".into())),
-                        Datum::Symbol(Identifier::InitialSubsequent("b".into()))
+                        Datum::Symbol(IdentifierAtom::from("a")),
+                        Datum::Symbol(IdentifierAtom::from("b"))
                     ]))
                 ])
             ))
@@ -447,11 +447,11 @@ mod tests {
                 "",
                 List::Dot(
                     OneOrMore::More(vec![
-                        Datum::Symbol(Identifier::InitialSubsequent("a".into())),
-                        Datum::Symbol(Identifier::InitialSubsequent("b".into())),
-                        Datum::Symbol(Identifier::InitialSubsequent("c".into()))
+                        Datum::Symbol(IdentifierAtom::from("a")),
+                        Datum::Symbol(IdentifierAtom::from("b")),
+                        Datum::Symbol(IdentifierAtom::from("c"))
                     ]),
-                    Box::new(Datum::Symbol(Identifier::InitialSubsequent("b".into())))
+                    Box::new(Datum::Symbol(IdentifierAtom::from("b")))
                 )
             ))
         )
@@ -470,10 +470,7 @@ mod tests {
 
         assert_eq!(
             datum::<_, VerboseError<&str>>("foo"),
-            Ok((
-                "",
-                Datum::Symbol(Identifier::InitialSubsequent("foo".into()))
-            ))
+            Ok(("", Datum::Symbol(IdentifierAtom::from("foo"))))
         );
 
         assert_eq!(
@@ -481,9 +478,9 @@ mod tests {
             Ok((
                 "",
                 Datum::List(List::NList(vec![
-                    Datum::Symbol(Identifier::InitialSubsequent("a".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("b".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("c".into()))
+                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(IdentifierAtom::from("b")),
+                    Datum::Symbol(IdentifierAtom::from("c"))
                 ]))
             ))
         );
@@ -493,9 +490,9 @@ mod tests {
             Ok((
                 "",
                 Datum::Vector(vec![
-                    Datum::Symbol(Identifier::InitialSubsequent("a".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("b".into())),
-                    Datum::Symbol(Identifier::InitialSubsequent("c".into()))
+                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(IdentifierAtom::from("b")),
+                    Datum::Symbol(IdentifierAtom::from("c"))
                 ])
             ))
         )
