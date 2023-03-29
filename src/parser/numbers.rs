@@ -8,9 +8,10 @@ use nom::{
     sequence::{pair, preceded, separated_pair, terminated, tuple},
     AsChar, IResult, InputIter, InputLength, InputTakeAtPosition, Offset, Slice,
 };
+use num::{rational::Ratio, Complex as NumComplex, FromPrimitive, One, ToPrimitive, Zero};
 use std::{
     num::{ParseFloatError, ParseIntError},
-    ops::{RangeFrom, RangeTo},
+    ops::{Add, Div, Mul, RangeFrom, RangeTo, Sub},
     str::FromStr,
 };
 
@@ -63,12 +64,6 @@ impl<T> ParseToNumber for T where
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
-pub enum Numerical {
-    Integer(isize),
-    Float(f64),
-}
-
-#[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Prefix {
     pub radix: Radix,
     pub exactness: Exactness,
@@ -90,7 +85,46 @@ where
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub struct Num {
     pub exactness: Exactness,
-    pub complex: Complex,
+    pub complex: NumComplex<Real>,
+}
+
+impl FromPrimitive for Num {
+    fn from_i64(n: i64) -> Option<Self> {
+        let real = if n > 0 {
+            Ureal::Uinteger(n.unsigned_abs() as usize).with_sign(1)
+        } else if n < 0 {
+            Ureal::Uinteger(n.unsigned_abs() as usize).with_sign(-1)
+        } else {
+            Real::zero()
+        };
+
+        Some(Num {
+            exactness: Exactness::Exact,
+            complex: NumComplex::new(real, Real::zero()),
+        })
+    }
+
+    fn from_u64(n: u64) -> Option<Self> {
+        Some(Num {
+            exactness: Exactness::Exact,
+            complex: NumComplex::new(Ureal::Uinteger(n as usize).with_sign(1), Real::zero()),
+        })
+    }
+
+    fn from_f64(n: f64) -> Option<Self> {
+        let real = if n.is_zero() {
+            Real::zero()
+        } else if n.is_sign_positive() {
+            Ureal::Decimal(n.abs()).with_sign(1)
+        } else {
+            Ureal::Decimal(n.abs()).with_sign(-1)
+        };
+
+        Some(Num {
+            exactness: Exactness::Exact,
+            complex: NumComplex::new(real, Real::zero()),
+        })
+    }
 }
 
 pub(super) fn num<
@@ -109,15 +143,37 @@ where
 {
     let (input, prefix) = prefix(input)?;
     map(complex(prefix.radix), move |complex| Num {
-        exactness: prefix.exactness,
-        complex,
+        exactness: complex.exactness(),
+        complex: complex.into(),
     })(input)
 }
 
-#[derive(Debug, PartialEq, Copy, Clone)]
-pub struct Complex {
+#[derive(Debug, Default, PartialEq, Copy, Clone)]
+struct Complex {
     pub real: Option<Real>,
     pub imag: Option<Real>,
+}
+
+impl From<Complex> for NumComplex<Real> {
+    fn from(value: Complex) -> NumComplex<Real> {
+        NumComplex::new(
+            value.real.unwrap_or(Real::zero()),
+            value.imag.unwrap_or(Real::zero()),
+        )
+    }
+}
+
+impl Complex {
+    pub fn exactness(&self) -> Exactness {
+        let real = self.real.map(|r| r.exactness()).unwrap_or(Exactness::Exact);
+        let complex = self.imag.map(|r| r.exactness()).unwrap_or(Exactness::Exact);
+
+        if real == complex {
+            real
+        } else {
+            Exactness::Inexact
+        }
+    }
 }
 
 fn complex<
@@ -134,24 +190,24 @@ where
     alt((
         (map(preceded(char('+'), imag(radix)), |u| Complex {
             real: None,
-            imag: Some(Real::Positive(u)),
+            imag: Some(u.with_sign(1)),
         })),
         (map(preceded(char('-'), imag(radix)), |u| Complex {
             real: None,
-            imag: Some(Real::Negative(u)),
+            imag: Some(u.with_sign(-1)),
         })),
         (map(
             separated_pair(real(radix), whitespace_delimited(char('+')), imag(radix)),
             |(real, u)| Complex {
                 real: Some(real),
-                imag: Some(Real::Positive(u)),
+                imag: Some(u.with_sign(1)),
             },
         )),
         (map(
             separated_pair(real(radix), whitespace_delimited(char('-')), imag(radix)),
             |(real, u)| Complex {
                 real: Some(real),
-                imag: Some(Real::Negative(u)),
+                imag: Some(u.with_sign(-1)),
             },
         )),
         map(real(radix), |r| Complex {
@@ -180,8 +236,123 @@ where
 
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Real {
-    Positive(Ureal),
-    Negative(Ureal),
+    Integer(isize),
+    Frac(Ratio<isize>),
+    Decimal(Decimal10),
+}
+
+impl ToPrimitive for Real {
+    fn to_i64(&self) -> Option<i64> {
+        match self {
+            Self::Integer(i) => i.to_i64(),
+            Self::Frac(r) => r.to_i64(),
+            Self::Decimal(f) => f.to_i64(),
+        }
+    }
+
+    fn to_u64(&self) -> Option<u64> {
+        match self {
+            Self::Integer(i) => i.to_u64(),
+            Self::Frac(r) => r.to_u64(),
+            Self::Decimal(f) => f.to_u64(),
+        }
+    }
+
+    fn to_f64(&self) -> Option<f64> {
+        match self {
+            Self::Integer(i) => i.to_f64(),
+            Self::Frac(r) => r.to_f64(),
+            Self::Decimal(f) => f.to_f64(),
+        }
+    }
+}
+
+impl FromPrimitive for Real {
+    fn from_i64(n: i64) -> Option<Real> {
+        Some(Real::Integer(n as isize))
+    }
+
+    fn from_u64(n: u64) -> Option<Real> {
+        Some(Real::Integer(n as isize))
+    }
+
+    fn from_f64(n: f64) -> Option<Real> {
+        Some(Real::Decimal(n))
+    }
+}
+
+impl Zero for Real {
+    fn zero() -> Self {
+        Self::Integer(0)
+    }
+
+    fn is_zero(&self) -> bool {
+        match self {
+            Self::Decimal(f) => f.is_zero(),
+            Self::Frac(r) => r.is_zero(),
+            Self::Integer(i) => i.is_zero(),
+        }
+    }
+}
+
+impl One for Real {
+    fn one() -> Self {
+        Self::Integer(1)
+    }
+
+    fn is_one(&self) -> bool {
+        match self {
+            Self::Decimal(f) => f.is_one(),
+            Self::Frac(r) => r.is_one(),
+            Self::Integer(i) => i.is_one(),
+        }
+    }
+}
+
+macro_rules! op_impl {
+    ($t:ty, $f:ident, $o:tt) => {
+        impl $t for Real {
+            type Output = Self;
+            fn $f (self, rhs: Real) -> Self {
+                if matches!(self, Real::Decimal(_)) || matches!(rhs, Real::Decimal(_)) {
+                    Self::Decimal(self.to_f64().unwrap() $o rhs.to_f64().unwrap())
+                } else {
+                    let lhs = match self {
+                        Real::Frac(r) => r,
+                        Real::Integer(i) => Ratio::new_raw(i, 1),
+                        _ => unreachable!(),
+                    };
+                    let rhs = match rhs {
+                        Real::Frac(r) => r,
+                        Real::Integer(i) => Ratio::new_raw(i, 1),
+                        _ => unreachable!(),
+                    };
+
+                    let result = lhs $o rhs;
+                    if result.is_integer() {
+                        Self::Integer(*result.numer())
+                    } else {
+                        Self::Frac(result)
+                    }
+                }
+            }
+        }
+    };
+}
+
+op_impl!(Add, add, +);
+op_impl!(Mul, mul, *);
+op_impl!(Sub, sub, -);
+op_impl!(Div, div, /);
+
+impl Real {
+    pub fn exactness(&self) -> Exactness {
+        if matches!(self, Self::Decimal(_)) {
+            Exactness::Inexact
+        } else {
+            Exactness::Exact
+        }
+    }
 }
 
 fn real<
@@ -197,10 +368,11 @@ where
 {
     map(
         tuple((opt(alt((char('+'), char('-')))), ureal(radix))),
-        |(sign, ur)| match sign {
-            Some('-') => Real::Negative(ur),
-            Some('+') | None => Real::Positive(ur),
-            _ => Real::Positive(ur),
+        |(sign, ur)| {
+            ur.with_sign(match sign {
+                Some('-') => -1,
+                Some('+') | _ => 1,
+            })
         },
     )
 }
@@ -208,8 +380,20 @@ where
 #[derive(Debug, PartialEq, Copy, Clone)]
 pub enum Ureal {
     Uinteger(Uinteger),
-    Frac(Uinteger, Uinteger),
+    Frac(Ratio<usize>),
     Decimal(Decimal10),
+}
+
+impl Ureal {
+    pub fn with_sign(&self, signum: i8) -> Real {
+        match self {
+            Ureal::Uinteger(u) => Real::Integer(signum as isize * *u as isize),
+            Ureal::Frac(r) => {
+                Real::Frac(Ratio::new(*r.numer() as isize, *r.denom() as isize) * signum as isize)
+            }
+            Ureal::Decimal(d) => Real::Decimal(d * signum as f64),
+        }
+    }
 }
 
 fn ureal<
@@ -231,7 +415,7 @@ where
                 whitespace_delimited(char('/')),
                 uinteger(radix),
             ),
-            |(n, d)| Ureal::Frac(n, d),
+            |(n, d)| Ureal::Frac(Ratio::new(n, d)),
         ),
         map(uinteger(radix), Ureal::Uinteger),
     ))
@@ -338,13 +522,7 @@ where
                 )),
                 opt(recognize(tuple((
                     preceded(
-                        alt((
-                            char::<I, _>('e'),
-                            char('s'),
-                            char('f'),
-                            char('d'),
-                            char('l'),
-                        )),
+                        alt((char('e'), char('s'), char('f'), char('d'), char('l'))),
                         sign,
                     ),
                     digit1,
@@ -396,9 +574,14 @@ where
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum Exactness {
-    Empty,
     Inexact,
     Exact,
+}
+
+impl Default for Exactness {
+    fn default() -> Self {
+        Self::Exact
+    }
 }
 
 fn exactness<I, E: ParseError<I>>(input: I) -> IResult<I, Exactness, E>
@@ -409,7 +592,7 @@ where
     alt((
         value(Exactness::Inexact, char('i')),
         value(Exactness::Exact, char('e')),
-        success(Exactness::Empty),
+        success(Exactness::Exact),
     ))(input)
 }
 
@@ -469,17 +652,17 @@ mod tests {
         let cases = [
             case("#be", Two, Exact),
             case("#bi", Two, Inexact),
-            case("#b", Two, Empty),
+            case("#b", Two, Exact),
             case("#oe", Eight, Exact),
             case("#oi", Eight, Inexact),
-            case("#o", Eight, Empty),
+            case("#o", Eight, Exact),
             case("e", Ten, Exact),
             case("#de", Ten, Exact),
             case("i", Ten, Inexact),
-            case("", Ten, Empty),
+            case("", Ten, Exact),
             case("#xe", Sixteen, Exact),
             case("#xi", Sixteen, Inexact),
-            case("#x", Sixteen, Empty),
+            case("#x", Sixteen, Exact),
         ];
 
         for case in cases {
@@ -498,62 +681,57 @@ mod tests {
             input: &'static str,
             num: Num,
         }
-        fn case(
-            input: &'static str,
-            exactness: Exactness,
-            real: Option<Real>,
-            imag: Option<Real>,
-        ) -> Case {
+        fn case(input: &'static str, exactness: Exactness, real: Real, imag: Real) -> Case {
             Case {
                 input,
                 num: Num {
                     exactness,
-                    complex: Complex { real, imag },
+                    complex: NumComplex::new(real, imag),
                 },
             }
         }
         let cases = [
             case(
                 "-2.0i",
-                Exactness::Empty,
-                None,
-                Some(Real::Negative(Ureal::Decimal(2.0))),
+                Exactness::Inexact,
+                Real::zero(),
+                Real::from_f64(-2.0).unwrap(),
             ),
             case(
                 "+2.0i",
-                Exactness::Empty,
-                None,
-                Some(Real::Positive(Ureal::Decimal(2.0))),
+                Exactness::Inexact,
+                Real::zero(),
+                Real::from_f64(2.0).unwrap(),
             ),
             case(
                 "1 +2i",
-                Exactness::Empty,
-                Some(Real::Positive(Ureal::Uinteger(1))),
-                Some(Real::Positive(Ureal::Uinteger(2))),
+                Exactness::Exact,
+                Real::from_i64(1).unwrap(),
+                Real::from_i64(2).unwrap(),
             ),
             case(
                 "1.0 + 2i",
-                Exactness::Empty,
-                Some(Real::Positive(Ureal::Decimal(1.0))),
-                Some(Real::Positive(Ureal::Uinteger(2))),
+                Exactness::Inexact,
+                Real::from_f64(1.0).unwrap(),
+                Real::from_i64(2).unwrap(),
             ),
             case(
                 "1+ 2.0i",
-                Exactness::Empty,
-                Some(Real::Positive(Ureal::Uinteger(1))),
-                Some(Real::Positive(Ureal::Decimal(2.0))),
+                Exactness::Inexact,
+                Real::from_i64(1).unwrap(),
+                Real::from_f64(2.0).unwrap(),
             ),
             case(
                 "1.0  + 2.0i",
-                Exactness::Empty,
-                Some(Real::Positive(Ureal::Decimal(1.0))),
-                Some(Real::Positive(Ureal::Decimal(2.0))),
+                Exactness::Inexact,
+                Real::from_f64(1.0).unwrap(),
+                Real::from_f64(2.0).unwrap(),
             ),
             case(
                 "-1.0  + 2.0i",
-                Exactness::Empty,
-                Some(Real::Negative(Ureal::Decimal(1.0))),
-                Some(Real::Positive(Ureal::Decimal(2.0))),
+                Exactness::Inexact,
+                Real::from_f64(-1.0).unwrap(),
+                Real::from_f64(2.0).unwrap(),
             ),
         ];
 

@@ -239,8 +239,8 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::parser::atoms::*;
-    use data::{List, Symbol};
+    use crate::parser::{atoms::*, Identifier};
+    use data::List;
     use nom::error::{ErrorKind, VerboseError, VerboseErrorKind};
     use std::assert_matches::assert_matches;
 
@@ -264,9 +264,9 @@ mod test {
             Ok((
                 "",
                 Expression::Application(OneOrMore::More(vec![
-                    Expression::Variable(ident_atom!("+")),
-                    Expression::Variable(IdentifierAtom::from("a")),
-                    Expression::Variable(IdentifierAtom::from("b"))
+                    Expression::Variable(Identifier::Known(ident_atom!("+"))),
+                    Expression::Variable(Identifier::from("a")),
+                    Expression::Variable(Identifier::from("b"))
                 ]))
             ))
         );
@@ -275,9 +275,9 @@ mod test {
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
-                    Datum::Symbol(ident_atom!("+")),
-                    Datum::Symbol(IdentifierAtom::from("a")),
-                    Datum::Symbol(IdentifierAtom::from("b"))
+                    Datum::Symbol(Identifier::Known(ident_atom!("+"))),
+                    Datum::Symbol(Identifier::from("a")),
+                    Datum::Symbol(Identifier::from("b"))
                 ])))
             ))
         );
@@ -286,8 +286,8 @@ mod test {
             Ok((
                 "",
                 Expression::Set {
-                    var: IdentifierAtom::from("foo"),
-                    expr: Box::new(Expression::Variable(IdentifierAtom::from("bar")))
+                    var: Identifier::from("foo"),
+                    expr: Box::new(Expression::Variable(Identifier::from("bar")))
                 }
             ))
         );
@@ -296,11 +296,11 @@ mod test {
             Ok((
                 "",
                 Expression::Set {
-                    var: IdentifierAtom::from("foo"),
+                    var: Identifier::from("foo"),
                     expr: Box::new(Expression::Quote(Datum::List(List::NList(vec![
-                        Datum::Symbol(ident_atom!("+")),
-                        Datum::Symbol(IdentifierAtom::from("a")),
-                        Datum::Symbol(IdentifierAtom::from("b"))
+                        Datum::Symbol(Identifier::Known(ident_atom!("+"))),
+                        Datum::Symbol(Identifier::from("a")),
+                        Datum::Symbol(Identifier::from("b"))
                     ]))))
                 }
             ))
@@ -310,9 +310,9 @@ mod test {
             Ok((
                 "",
                 Expression::Quote(Datum::List(List::NList(vec![
-                    Datum::Symbol(ident_atom!("+")),
-                    Datum::Symbol(IdentifierAtom::from("a")),
-                    Datum::Symbol(IdentifierAtom::from("b"))
+                    Datum::Symbol(Identifier::Known(ident_atom!("+"))),
+                    Datum::Symbol(Identifier::from("a")),
+                    Datum::Symbol(Identifier::from("b"))
                 ])))
             ))
         );
@@ -322,12 +322,12 @@ mod test {
                 "",
                 Expression::If {
                     cond: Box::new(Expression::Application(OneOrMore::More(vec![
-                        Expression::Variable(ident_atom!(">")),
-                        Expression::Variable(IdentifierAtom::from("a")),
-                        Expression::Variable(IdentifierAtom::from("b"))
+                        Expression::Variable(Identifier::Known(ident_atom!(">"))),
+                        Expression::Variable(Identifier::from("a")),
+                        Expression::Variable(Identifier::from("b"))
                     ]))),
-                    then: Box::new(Expression::Variable(IdentifierAtom::from("foo"))),
-                    else_expr: Some(Box::new(Expression::Variable(IdentifierAtom::from("bar")))),
+                    then: Box::new(Expression::Variable(Identifier::from("foo"))),
+                    else_expr: Some(Box::new(Expression::Variable(Identifier::from("bar")))),
                 }
             ))
         );
@@ -336,10 +336,10 @@ mod test {
             Ok((
                 "",
                 Expression::Lambda {
-                    formals: Formals::Rest(IdentifierAtom::from("foo")),
+                    formals: Formals::Rest(Identifier::from("foo")),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("bar"))))
                     )
                 }
             ))
@@ -350,13 +350,13 @@ mod test {
                 "",
                 Expression::Lambda {
                     formals: Formals::Variables(vec![
-                        IdentifierAtom::from("foo"),
-                        IdentifierAtom::from("a1"),
-                        IdentifierAtom::from("a2")
+                        Identifier::from("foo"),
+                        Identifier::from("a1"),
+                        Identifier::from("a2")
                     ]),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("bar"))))
                     )
                 }
             ))
@@ -367,15 +367,12 @@ mod test {
                 "",
                 Expression::Lambda {
                     formals: Formals::VariablesRest(
-                        OneOrMore::More(vec![
-                            IdentifierAtom::from("foo"),
-                            IdentifierAtom::from("a1"),
-                        ]),
-                        IdentifierAtom::from("rest")
+                        OneOrMore::More(vec![Identifier::from("foo"), Identifier::from("a1"),]),
+                        Identifier::from("rest")
                     ),
                     body: Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("bar"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("bar"))))
                     )
                 }
             ))
@@ -387,17 +384,17 @@ mod test {
                 Expression::Let(Let::SimpleLet(
                     vec![
                         Binding {
-                            var: IdentifierAtom::from("a"),
-                            expr: Expression::Variable(IdentifierAtom::from("b"))
+                            var: Identifier::from("a"),
+                            expr: Expression::Variable(Identifier::from("b"))
                         },
                         Binding {
-                            var: IdentifierAtom::from("c"),
-                            expr: Expression::Variable(IdentifierAtom::from("d"))
+                            var: Identifier::from("c"),
+                            expr: Expression::Variable(Identifier::from("d"))
                         },
                     ],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("c"))))
                     )
                 ))
             ))
@@ -407,14 +404,14 @@ mod test {
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
-                    IdentifierAtom::from("f"),
+                    Identifier::from("f"),
                     vec![Binding {
-                        var: IdentifierAtom::from("a"),
-                        expr: Expression::Variable(IdentifierAtom::from("b"))
+                        var: Identifier::from("a"),
+                        expr: Expression::Variable(Identifier::from("b"))
                     }],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("c"))))
                     )
                 ))
             ))
@@ -424,20 +421,20 @@ mod test {
             Ok((
                 "",
                 Expression::Let(Let::NamedLet(
-                    IdentifierAtom::from("f"),
+                    Identifier::from("f"),
                     vec![
                         Binding {
-                            var: IdentifierAtom::from("a"),
-                            expr: Expression::Variable(IdentifierAtom::from("b"))
+                            var: Identifier::from("a"),
+                            expr: Expression::Variable(Identifier::from("b"))
                         },
                         Binding {
-                            var: IdentifierAtom::from("c"),
-                            expr: Expression::Variable(IdentifierAtom::from("d"))
+                            var: Identifier::from("c"),
+                            expr: Expression::Variable(Identifier::from("d"))
                         },
                     ],
                     Body(
                         vec![],
-                        OneOrMore::One(Box::new(Expression::Variable(IdentifierAtom::from("c"))))
+                        OneOrMore::One(Box::new(Expression::Variable(Identifier::from("c"))))
                     )
                 ))
             ))

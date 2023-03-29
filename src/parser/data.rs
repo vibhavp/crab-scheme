@@ -356,8 +356,6 @@ where
 mod tests {
     use nom::error::VerboseError;
 
-    use crate::parser::atoms::IdentifierAtom;
-
     use super::*;
 
     #[test]
@@ -412,9 +410,9 @@ mod tests {
             Ok((
                 "",
                 List::NList(vec![
-                    Datum::Symbol(IdentifierAtom::from("a")),
-                    Datum::Symbol(IdentifierAtom::from("b")),
-                    Datum::Symbol(IdentifierAtom::from("c"))
+                    Datum::Symbol(Identifier::from("a")),
+                    Datum::Symbol(Identifier::from("b")),
+                    Datum::Symbol(Identifier::from("c"))
                 ])
             ))
         );
@@ -423,8 +421,8 @@ mod tests {
             Ok((
                 "",
                 List::Dot(
-                    OneOrMore::One(Box::new(Datum::Symbol(IdentifierAtom::from("a")))),
-                    Box::new(Datum::Symbol(IdentifierAtom::from("b")))
+                    OneOrMore::One(Box::new(Datum::Symbol(Identifier::from("a")))),
+                    Box::new(Datum::Symbol(Identifier::from("b")))
                 )
             ))
         );
@@ -433,10 +431,10 @@ mod tests {
             Ok((
                 "",
                 List::NList(vec![
-                    Datum::Symbol(IdentifierAtom::from("a")),
+                    Datum::Symbol(Identifier::from("a")),
                     Datum::List(List::NList(vec![
-                        Datum::Symbol(IdentifierAtom::from("a")),
-                        Datum::Symbol(IdentifierAtom::from("b"))
+                        Datum::Symbol(Identifier::from("a")),
+                        Datum::Symbol(Identifier::from("b"))
                     ]))
                 ])
             ))
@@ -447,11 +445,11 @@ mod tests {
                 "",
                 List::Dot(
                     OneOrMore::More(vec![
-                        Datum::Symbol(IdentifierAtom::from("a")),
-                        Datum::Symbol(IdentifierAtom::from("b")),
-                        Datum::Symbol(IdentifierAtom::from("c"))
+                        Datum::Symbol(Identifier::from("a")),
+                        Datum::Symbol(Identifier::from("b")),
+                        Datum::Symbol(Identifier::from("c"))
                     ]),
-                    Box::new(Datum::Symbol(IdentifierAtom::from("b")))
+                    Box::new(Datum::Symbol(Identifier::from("b")))
                 )
             ))
         )
@@ -470,7 +468,7 @@ mod tests {
 
         assert_eq!(
             datum::<_, VerboseError<&str>>("foo"),
-            Ok(("", Datum::Symbol(IdentifierAtom::from("foo"))))
+            Ok(("", Datum::Symbol(Identifier::from("foo"))))
         );
 
         assert_eq!(
@@ -478,9 +476,9 @@ mod tests {
             Ok((
                 "",
                 Datum::List(List::NList(vec![
-                    Datum::Symbol(IdentifierAtom::from("a")),
-                    Datum::Symbol(IdentifierAtom::from("b")),
-                    Datum::Symbol(IdentifierAtom::from("c"))
+                    Datum::Symbol(Identifier::from("a")),
+                    Datum::Symbol(Identifier::from("b")),
+                    Datum::Symbol(Identifier::from("c"))
                 ]))
             ))
         );
@@ -490,9 +488,9 @@ mod tests {
             Ok((
                 "",
                 Datum::Vector(vec![
-                    Datum::Symbol(IdentifierAtom::from("a")),
-                    Datum::Symbol(IdentifierAtom::from("b")),
-                    Datum::Symbol(IdentifierAtom::from("c"))
+                    Datum::Symbol(Identifier::from("a")),
+                    Datum::Symbol(Identifier::from("b")),
+                    Datum::Symbol(Identifier::from("c"))
                 ])
             ))
         )

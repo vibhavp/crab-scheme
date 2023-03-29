@@ -8,14 +8,69 @@ use nom::{
     sequence::tuple,
     AsChar, Compare, IResult, InputIter, InputLength, InputTake, Offset, Slice,
 };
-use std::ops::{RangeFrom, RangeTo};
+use std::{
+    borrow::Cow,
+    fmt,
+    ops::{Deref, RangeFrom, RangeTo},
+};
+use string_cache::DefaultAtom;
 
 #[macro_use]
 pub mod atoms {
     include!(concat!(env!("OUT_DIR"), "/identifier_atom.rs"));
 }
 
-pub type Identifier = atoms::IdentifierAtom;
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+pub enum Identifier {
+    Known(atoms::KnownIdentifierAtom),
+    Other(DefaultAtom),
+}
+
+impl fmt::Display for Identifier {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        <str as fmt::Display>::fmt(self, f)
+    }
+}
+
+impl<'a> From<Cow<'a, str>> for Identifier {
+    fn from(value: Cow<'a, str>) -> Self {
+        atoms::KnownIdentifierAtom::try_static(&value)
+            .map(Identifier::Known)
+            .unwrap_or_else(|| Identifier::Other(DefaultAtom::from(value)))
+    }
+}
+
+impl From<&str> for Identifier {
+    fn from(value: &str) -> Self {
+        Identifier::from(Cow::from(value))
+    }
+}
+
+impl From<String> for Identifier {
+    fn from(value: String) -> Self {
+        Identifier::from(Cow::from(value))
+    }
+}
+
+impl Deref for Identifier {
+    type Target = str;
+
+    fn deref(&self) -> &str {
+        match self {
+            Self::Known(k) => k,
+            Self::Other(d) => d,
+        }
+    }
+}
+
+impl AsRef<str> for Identifier {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Known(k) => k,
+            Self::Other(d) => d,
+        }
+    }
+}
 
 pub trait ToIdentifier<'a>:
     Slice<RangeFrom<usize>>
@@ -26,7 +81,7 @@ pub trait ToIdentifier<'a>:
     + Compare<&'a str>
     + InputTake
     + Slice<RangeTo<usize>>
-    + Into<Identifier>
+    + Into<&'a str>
 {
 }
 
@@ -39,7 +94,7 @@ impl<'a, T> ToIdentifier<'a> for T where
         + Compare<&'a str>
         + InputTake
         + Slice<RangeTo<usize>>
-        + Into<Identifier>
+        + Into<&'a str>
 {
 }
 
@@ -55,7 +110,10 @@ where
             recognize(char('-')),
             recognize(tag("...")),
         )),
-        |s| s.into(),
+        |s| {
+            let s: &str = s.into();
+            Identifier::from(s.to_ascii_lowercase())
+        },
     )(input)
 }
 
