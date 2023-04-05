@@ -1,5 +1,5 @@
 use super::translate::TranslationContext;
-use crate::ir::IRExpression;
+use crate::ir::{IRExpression, Operation, Variable};
 
 pub trait BuildTree<'a>: Sized {
     type Error;
@@ -27,6 +27,4 @@ pub trait BuildTree<'a>: Sized {
             Ok(var)
         }
     }
-}
-
 }
