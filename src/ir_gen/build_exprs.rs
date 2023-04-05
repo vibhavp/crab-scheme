@@ -1,6 +1,8 @@
 use crate::{
     ir::{Application, CallTarget, ControlFlow, IRExpression, Node, Operation, Target},
-    parser::{Binding, Expression, Formals, Identifier, Let, Variable as ParsedVariable},
+    parser::{
+        atoms::KnownIdentifierAtom, Binding, Expression, Formals, Let, Variable as ParsedVariable,
+    },
 };
 use thiserror::Error;
 use tracing::instrument;
@@ -11,6 +13,12 @@ use super::{build_tree::BuildTree, translate::TranslationContext};
 pub enum ExprBuildError {
     #[error("undefined variable `{0}`")]
     UnknownVariable(ParsedVariable),
+    #[error("invalid number of arguments to ${primitive} (needed: ${needed}, have: ${have})")]
+    InvalidPrimitiveArgs {
+        primitive: KnownIdentifierAtom,
+        needed: usize,
+        have: usize,
+    },
 }
 
 impl<'a> BuildTree<'a> for Expression<'a> {
@@ -125,12 +133,15 @@ impl<'a> BuildTree<'a> for Expression<'a> {
             Expression::Application(app) => {
                 let mut call: Vec<_> = app.into();
                 // match call[0] {
-                //     Expression::Variable(Identifier::Plus) => {}
-                //     Expression::Variable(Identifier::)
+                //     Expression::Variable(ident_atom!("+")) => {}
+                //     Expression::Variable(ident_atom("-")) => {}
+                //     Expression::Variable(ident_atom!("*")) => {}
+                //     Expression::Variable(ident_atom!("/")) => {}
+
+                //     _ => {
+                //         todo!()
                 //     }
-                // if let Expression::Variable(ident) = &call[0] {
-                //     match ident {}
-                // }
+                // };
                 let (proc_var, _) = context.push_define(None, true);
                 {
                     let proc_expr = call.remove(0).build(context)?;

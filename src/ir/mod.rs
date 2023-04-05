@@ -13,9 +13,11 @@ use std::fmt::{Display, Error, Formatter};
 pub use self::control::{ControlFlow, Target};
 use self::query::{IRQuery, TraversalError};
 pub use node::Node;
-pub use ops::{Application, CallTarget, Operation, PrimitiveApplication};
+pub use ops::{
+    Application, BitwiseOp, BooleanOp, CallTarget, MathOp, Operation, PairOp, PrimitiveApplication,
+};
 pub use proc::Procedure;
-pub use types::Type;
+pub use types::{NumberType, Type};
 pub use var::Variable;
 
 use crate::parser::Datum;

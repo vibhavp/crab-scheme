@@ -1,4 +1,4 @@
-use super::{IRExpression, Procedure, Variable, WithIRNodeNames};
+use super::{IRExpression, Procedure, Type, Variable, WithIRNodeNames};
 use std::fmt::{Display, Error, Formatter};
 
 #[derive(Debug, Clone)]
@@ -6,6 +6,7 @@ pub enum Operation<'a> {
     Define(Variable),
     Set(Variable, IRExpression<'a>),
     Application(Application),
+    Primitive(PrimitiveApplication),
     Nop,
 }
 
@@ -16,6 +17,7 @@ impl<'a> Display for WithIRNodeNames<'a, &Operation<'a>> {
             Operation::Set(v, e) => write!(f, "set {} = {}", v, WithIRNodeNames(self.0, e)),
             Operation::Application(app) => write!(f, "{}", WithIRNodeNames(self.0, app)),
             Operation::Nop => write!(f, "nop"),
+            _ => todo!(),
         }
     }
 }
@@ -60,8 +62,17 @@ pub enum MathOp {
     Subtract,
     Multiply,
     Divide,
-    Pow,
-    Modulo,
+}
+
+impl From<MathOp> for char {
+    fn from(value: MathOp) -> char {
+        match value {
+            MathOp::Add => '+',
+            MathOp::Subtract => '-',
+            MathOp::Multiply => '*',
+            MathOp::Divide => '/',
+        }
+    }
 }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
@@ -80,8 +91,24 @@ pub enum BitwiseOp {
 }
 
 #[derive(Debug, Clone)]
+pub enum PairOp {
+    Car(Variable),
+    Cdr(Variable),
+
+    SetCar(Variable, Variable),
+    SetCdr(Variable, Variable),
+
+    Listp(Variable),
+}
+
+#[derive(Debug, Clone)]
 pub enum PrimitiveApplication {
+    TypeAssert(Type, Variable),
+    TypePredicate(Type, Variable),
+
     Math(MathOp, Variable, Variable),
     Boolean(BooleanOp, Variable, Variable),
     BitwiseOp(BitwiseOp, Variable, Variable),
+
+    Pair(PairOp),
 }

@@ -3,15 +3,17 @@ use nom::{
     branch::{alt, permutation},
     character::complete::{char, digit0, digit1},
     combinator::{cut, map, map_res, opt, recognize, success, value},
-    error::{context, ContextError, FromExternalError, ParseError},
+    error::{context, ContextError, Error, FromExternalError, ParseError},
     multi::many0_count,
     sequence::{pair, preceded, separated_pair, terminated, tuple},
     AsChar, IResult, InputIter, InputLength, InputTakeAtPosition, Offset, Slice,
 };
-use num::{rational::Ratio, Complex as NumComplex, FromPrimitive, One, ToPrimitive, Zero};
+use num::{
+    rational::Ratio, Complex as NumComplex, FromPrimitive, Num as NumTrait, One, ToPrimitive, Zero,
+};
 use std::{
     num::{ParseFloatError, ParseIntError},
-    ops::{Add, Div, Mul, RangeFrom, RangeTo, Sub},
+    ops::{Add, Div, Mul, RangeFrom, RangeTo, Rem, Sub},
     str::FromStr,
 };
 
@@ -88,41 +90,76 @@ pub struct Num {
     pub complex: NumComplex<Real>,
 }
 
+macro_rules! num_op_impl {
+    ($t:ty, $f:ident) => {
+        impl $t for Num {
+            type Output = Self;
+            fn $f(self, rhs: Self) -> Self {
+                let exactness = if self.exactness != rhs.exactness {
+                    Exactness::Inexact
+                } else {
+                    self.exactness
+                };
+
+                Num {
+                    exactness,
+                    complex: self.complex.$f(rhs.complex),
+                }
+            }
+        }
+    };
+}
+num_op_impl!(Add, add);
+num_op_impl!(Mul, mul);
+num_op_impl!(Div, div);
+num_op_impl!(Sub, sub);
+num_op_impl!(Rem, rem);
+
+impl Zero for Num {
+    fn zero() -> Self {
+        Self {
+            exactness: Exactness::Exact,
+            complex: Zero::zero(),
+        }
+    }
+
+    fn is_zero(&self) -> bool {
+        self.complex.is_zero()
+    }
+}
+
+impl One for Num {
+    fn one() -> Self {
+        Self {
+            exactness: Exactness::Exact,
+            complex: One::one(),
+        }
+    }
+
+    fn is_one(&self) -> bool {
+        self.complex.is_one()
+    }
+}
+
 impl FromPrimitive for Num {
     fn from_i64(n: i64) -> Option<Self> {
-        let real = if n > 0 {
-            Ureal::Uinteger(n.unsigned_abs() as usize).with_sign(1)
-        } else if n < 0 {
-            Ureal::Uinteger(n.unsigned_abs() as usize).with_sign(-1)
-        } else {
-            Real::zero()
-        };
-
         Some(Num {
             exactness: Exactness::Exact,
-            complex: NumComplex::new(real, Real::zero()),
+            complex: NumComplex::new(Real::from_i64(n)?, Real::zero()),
         })
     }
 
     fn from_u64(n: u64) -> Option<Self> {
         Some(Num {
             exactness: Exactness::Exact,
-            complex: NumComplex::new(Ureal::Uinteger(n as usize).with_sign(1), Real::zero()),
+            complex: NumComplex::new(Real::from_u64(n)?, Real::zero()),
         })
     }
 
     fn from_f64(n: f64) -> Option<Self> {
-        let real = if n.is_zero() {
-            Real::zero()
-        } else if n.is_sign_positive() {
-            Ureal::Decimal(n.abs()).with_sign(1)
-        } else {
-            Ureal::Decimal(n.abs()).with_sign(-1)
-        };
-
         Some(Num {
             exactness: Exactness::Exact,
-            complex: NumComplex::new(real, Real::zero()),
+            complex: NumComplex::new(Real::from_f64(n)?, Real::zero()),
         })
     }
 }
@@ -241,6 +278,29 @@ pub enum Real {
     Decimal(Decimal10),
 }
 
+pub enum NumFromStrRadixErr {
+    Nom(()),
+    UnsupportedRadix,
+}
+
+impl NumTrait for Real {
+    type FromStrRadixErr = NumFromStrRadixErr;
+
+    fn from_str_radix(str: &str, r: u32) -> Result<Real, Self::FromStrRadixErr> {
+        let radix = match r {
+            2 => Radix::Two,
+            8 => Radix::Eight,
+            10 => Radix::Ten,
+            16 => Radix::Sixteen,
+            _ => return Err(NumFromStrRadixErr::UnsupportedRadix),
+        };
+
+        real::<_, Error<&str>>(radix)(str)
+            .map(|(_, real)| real)
+            .map_err(|_| NumFromStrRadixErr::Nom(()))
+    }
+}
+
 impl ToPrimitive for Real {
     fn to_i64(&self) -> Option<i64> {
         match self {
@@ -310,12 +370,12 @@ impl One for Real {
 }
 
 macro_rules! op_impl {
-    ($t:ty, $f:ident, $o:tt) => {
+    ($t:ty, $f:ident) => {
         impl $t for Real {
             type Output = Self;
-            fn $f (self, rhs: Real) -> Self {
+            fn $f(self, rhs: Real) -> Self {
                 if matches!(self, Real::Decimal(_)) || matches!(rhs, Real::Decimal(_)) {
-                    Self::Decimal(self.to_f64().unwrap() $o rhs.to_f64().unwrap())
+                    Self::Decimal(self.to_f64().unwrap().$f(rhs.to_f64().unwrap()))
                 } else {
                     let lhs = match self {
                         Real::Frac(r) => r,
@@ -328,7 +388,7 @@ macro_rules! op_impl {
                         _ => unreachable!(),
                     };
 
-                    let result = lhs $o rhs;
+                    let result = lhs.$f(rhs);
                     if result.is_integer() {
                         Self::Integer(*result.numer())
                     } else {
@@ -340,10 +400,11 @@ macro_rules! op_impl {
     };
 }
 
-op_impl!(Add, add, +);
-op_impl!(Mul, mul, *);
-op_impl!(Sub, sub, -);
-op_impl!(Div, div, /);
+op_impl!(Add, add);
+op_impl!(Mul, mul);
+op_impl!(Sub, sub);
+op_impl!(Div, div);
+op_impl!(Rem, rem);
 
 impl Real {
     pub fn exactness(&self) -> Exactness {

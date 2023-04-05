@@ -11,6 +11,7 @@ pub enum Type {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum NumberType {
+    Number,
     Complex,
     Rational,
     Floating,
