@@ -4,10 +4,14 @@ use crate::{
         atoms::KnownIdentifierAtom, Binding, Expression, Formals, Let, Variable as ParsedVariable,
     },
 };
+use melior::ir::operation::ResultValue;
 use thiserror::Error;
 use tracing::instrument;
 
-use super::{build_tree::BuildTree, translate::TranslationContext};
+use super::{
+    build_tree::{BuildMLIR, BuildTree},
+    translate::{MLIRTranslationContext, TranslationContext},
+};
 
 #[derive(Debug, Error)]
 pub enum ExprBuildError {
@@ -183,6 +187,17 @@ impl<'a> BuildTree<'a> for Expression<'a> {
             }
             _ => todo!(),
         }
+    }
+}
+
+impl<'a> BuildMLIR for Expression<'a> {
+    type Error = ();
+
+    fn build_mlir<'ctx>(
+        self,
+        context: MLIRTranslationContext<'ctx>,
+    ) -> Result<ResultValue<'_>, Self::Error> {
+        todo!()
     }
 }
 

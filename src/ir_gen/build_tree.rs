@@ -1,5 +1,8 @@
-use super::translate::TranslationContext;
-use crate::ir::IRExpression;
+use melior::ir::operation::ResultValue;
+use thiserror::Error;
+
+use super::translate::{MLIRTranslationContext, TranslationContext};
+use crate::ir::{IRExpression, Operation, Variable};
 
 pub trait BuildTree<'a>: Sized {
     type Error;
@@ -29,4 +32,11 @@ pub trait BuildTree<'a>: Sized {
     }
 }
 
+pub trait BuildMLIR: Sized {
+    type Error;
+
+    fn build_mlir<'ctx>(
+        self,
+        context: MLIRTranslationContext<'ctx>,
+    ) -> Result<ResultValue<'_>, Self::Error>;
 }

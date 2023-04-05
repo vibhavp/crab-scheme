@@ -3,6 +3,7 @@ use crate::{
     ir::{ControlFlow, IRNodeRef, Node, Operation, Procedure, Target, Variable, IR},
     parser::Variable as ParsedVariable,
 };
+use melior::{ir::Module, Context};
 use slotmap::Key;
 use tracing::instrument;
 
@@ -16,6 +17,12 @@ pub struct TranslationContext<'a> {
 
     cur_procedure: Option<Procedure>,
     procedures: Vec<Procedure>,
+}
+
+#[derive(Debug)]
+pub struct MLIRTranslationContext<'ctx> {
+    pub context: &'ctx Context,
+    pub module: Module<'ctx>,
 }
 
 impl<'a> TranslationContext<'a> {
